@@ -538,9 +538,25 @@ static void pgraph_method_log(unsigned int subchannel,
                               unsigned int graphics_class,
                               unsigned int method, uint32_t parameter)
 {
-    const char *method_name = "?";
     static unsigned int last = 0;
     static unsigned int count = 0;
+    static bool tracing = false;
+
+    bool enabled =
+        trace_event_get_state_backends(TRACE_NV2A_PGRAPH_METHOD) ||
+        trace_event_get_state_backends(TRACE_NV2A_PGRAPH_METHOD_ABBREV);
+    if (!enabled) {
+        tracing = false;
+        return;
+    }
+
+    if (!tracing) {
+        last = 0;
+        count = 0;
+        tracing = true;
+    }
+
+    const char *method_name = "?";
 
     if (last == NV097_ARRAY_ELEMENT16 && method != last) {
         method_name = "NV097_ARRAY_ELEMENT16";
