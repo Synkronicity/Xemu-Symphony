@@ -78,6 +78,7 @@ typedef struct PipelineBinding {
     VkRenderPass render_pass;
     unsigned int draw_time;
     bool has_dynamic_line_width;
+    bool has_dynamic_blend_constants;
 } PipelineBinding;
 
 enum Buffer {
