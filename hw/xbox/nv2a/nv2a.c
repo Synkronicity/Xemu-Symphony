@@ -458,6 +458,19 @@ static int nv2a_post_load(void *opaque, int version_id)
         d->pgraph.vsh_carry_fog[3] = 1.0f;
     }
     d->pgraph.vsh_carry_cache_dirty = true;
+
+    /*
+     * Host renderer allocations are not part of VMState. Ensure that the
+     * restored guest constants are copied to the active Vulkan allocation.
+     */
+    pgraph_uniform_dirty_rows_invalidate(
+        d->pgraph.vsh_constants_dirty, NV2A_VERTEXSHADER_CONSTANTS);
+    pgraph_uniform_dirty_rows_invalidate(d->pgraph.ltctxa_dirty,
+                                         NV2A_LTCTXA_COUNT);
+    pgraph_uniform_dirty_rows_invalidate(d->pgraph.ltctxb_dirty,
+                                         NV2A_LTCTXB_COUNT);
+    pgraph_uniform_dirty_rows_invalidate(d->pgraph.ltc1_dirty,
+                                         NV2A_LTC1_COUNT);
     qatomic_set(&d->pgraph.flush_pending, true);
     nv2a_unlock_fifo(d);
     return 0;
@@ -550,13 +563,9 @@ static const VMStateDescription vmstate_nv2a = {
         VMSTATE_UINT32_ARRAY(pgraph.vertex_state_shader_v0, NV2AState, 4),
         VMSTATE_UINT32_2DARRAY(pgraph.program_data, NV2AState, NV2A_MAX_TRANSFORM_PROGRAM_LENGTH, VSH_TOKEN_SIZE),
         VMSTATE_UINT32_2DARRAY(pgraph.vsh_constants, NV2AState, NV2A_VERTEXSHADER_CONSTANTS, 4),
-        VMSTATE_BOOL_ARRAY(pgraph.vsh_constants_dirty, NV2AState, NV2A_VERTEXSHADER_CONSTANTS),
         VMSTATE_UINT32_2DARRAY(pgraph.ltctxa, NV2AState, NV2A_LTCTXA_COUNT, 4),
-        VMSTATE_BOOL_ARRAY(pgraph.ltctxa_dirty, NV2AState, NV2A_LTCTXA_COUNT),
         VMSTATE_UINT32_2DARRAY(pgraph.ltctxb, NV2AState, NV2A_LTCTXB_COUNT, 4),
-        VMSTATE_BOOL_ARRAY(pgraph.ltctxb_dirty, NV2AState, NV2A_LTCTXB_COUNT),
         VMSTATE_UINT32_2DARRAY(pgraph.ltc1, NV2AState, NV2A_LTC1_COUNT, 4),
-        VMSTATE_BOOL_ARRAY(pgraph.ltc1_dirty, NV2AState, NV2A_LTC1_COUNT),
         VMSTATE_STRUCT_ARRAY(pgraph.vertex_attributes, NV2AState, NV2A_VERTEXSHADER_ATTRIBUTES, 1, vmstate_nv2a_pgraph_vertex_attributes, VertexAttribute),
         VMSTATE_UINT32(pgraph.inline_array_length, NV2AState),
         VMSTATE_UINT32_SUB_ARRAY(pgraph.inline_array, NV2AState, 0, NV2A_MAX_BATCH_LENGTH_V2),

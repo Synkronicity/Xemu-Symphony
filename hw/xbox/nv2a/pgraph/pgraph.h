@@ -31,6 +31,7 @@
 
 #include "surface.h"
 #include "texture.h"
+#include "uniform-dirty.h"
 #include "util.h"
 #include "vsh_regs.h"
 
@@ -214,7 +215,9 @@ typedef struct PGRAPHState {
     float light_local_attenuation[NV2A_MAX_LIGHTS][3];
 
     float specular_params[6];
+    float specular_power;
     float specular_params_back[6];
+    float specular_power_back;
 
     float point_params[8];
 
@@ -316,6 +319,16 @@ static inline void pgraph_reg_w(PGRAPHState *pg, unsigned int r, uint32_t v)
         bitmap_set(pg->regs_dirty, r / sizeof(uint32_t), 1);
     }
     pg->regs_[r] = v;
+}
+
+static inline void pgraph_uniform_u32_row_w(PGRAPHState *pg,
+                                            uint32_t (*rows)[4],
+                                            bool *dirty_rows,
+                                            unsigned int row,
+                                            unsigned int slot,
+                                            uint32_t value)
+{
+    pgraph_uniform_u32_row_update(rows, dirty_rows, row, slot, value);
 }
 
 /*
