@@ -1327,6 +1327,7 @@ void pgraph_vk_begin_command_buffer(PGRAPHState *pg)
     };
     VK_CHECK(vkBeginCommandBuffer(r->command_buffer,
                                   &command_buffer_begin_info));
+    pgraph_vk_invalidate_blend_constants(pg);
     r->command_buffer_start_time = pg->draw_time;
     r->in_command_buffer = true;
 }
@@ -1424,6 +1425,28 @@ static float clamp_line_width_to_device_limits(PGRAPHState *pg, float width)
     return fminf(fmaxf(min_width, width), max_width);
 }
 
+void pgraph_vk_invalidate_blend_constants(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    pgraph_vk_blend_constants_cache_invalidate(&r->blend_constants);
+}
+
+static void update_blend_constants(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    uint32_t guest_color = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
+
+    if (!pgraph_vk_blend_constants_cache_update(&r->blend_constants,
+                                                guest_color)) {
+        return;
+    }
+
+    float blend_constants[4];
+    pgraph_argb_pack32_to_rgba_float(guest_color, blend_constants);
+    vkCmdSetBlendConstants(r->command_buffer, blend_constants);
+}
+
 static void begin_draw(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -1504,14 +1527,14 @@ static void begin_draw(PGRAPHState *pg)
         r->pipeline_binding_changed = false;
     }
 
-    if (r->pipeline_binding->has_dynamic_blend_constants) {
-        float blend_constants[4];
-        uint32_t blend_color = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
-        pgraph_argb_pack32_to_rgba_float(blend_color, blend_constants);
-        vkCmdSetBlendConstants(r->command_buffer, blend_constants);
-    }
-
     if (!pg->clearing) {
+        /*
+         * Blend color is dynamic and may change without a pipeline bind.
+         * The cache is scoped to this command buffer and invalidated by the
+         * partial-clear path when it overwrites the Vulkan dynamic state.
+         */
+        update_blend_constants(pg);
+
         bind_descriptor_sets(pg);
         push_vertex_attr_values(pg);
     }
@@ -1760,6 +1783,7 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
             pgraph_get_clear_color(pg, blend_constants);
             vkCmdSetScissor(r->command_buffer, 0, 1, &clear_rect.rect);
             vkCmdSetBlendConstants(r->command_buffer, blend_constants);
+            pgraph_vk_invalidate_blend_constants(pg);
             vkCmdDraw(r->command_buffer, 3, 1, 0, 0);
         }
     }

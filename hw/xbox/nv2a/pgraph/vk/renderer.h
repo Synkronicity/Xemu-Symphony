@@ -37,6 +37,7 @@
 #include <spirv_reflect.h>
 #include <vk_mem_alloc.h>
 
+#include "blend-constants-cache.h"
 #include "debug.h"
 #include "constants.h"
 #include "glsl.h"
@@ -347,6 +348,7 @@ typedef struct PGRAPHVkState {
     unsigned int command_buffer_start_time;
     bool in_command_buffer;
     uint32_t submit_count;
+    PGRAPHVkBlendConstantsCache blend_constants;
 
     VkCommandBuffer aux_command_buffer;
     bool in_aux_command_buffer;
@@ -592,6 +594,7 @@ void pgraph_vk_draw_begin(NV2AState *d);
 void pgraph_vk_draw_end(NV2AState *d);
 void pgraph_vk_finish(PGRAPHState *pg, FinishReason why);
 void pgraph_vk_flush_draw(NV2AState *d);
+void pgraph_vk_invalidate_blend_constants(PGRAPHState *pg);
 void pgraph_vk_begin_command_buffer(PGRAPHState *pg);
 void pgraph_vk_ensure_command_buffer(PGRAPHState *pg);
 void pgraph_vk_ensure_not_in_render_pass(PGRAPHState *pg);

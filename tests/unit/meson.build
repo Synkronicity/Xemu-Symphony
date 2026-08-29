@@ -21,6 +21,7 @@ tests = {
   'test-visitor-serialization': [testqapi],
   'test-bitmap': [],
   'test-xbox-pgraph-uniform-dirty': [],
+  'test-xbox-vk-blend-constants': [],
   'test-resv-mem': [],
   # all code tested by test-x86-topo is inside topology.h
   'test-x86-topo': [],
