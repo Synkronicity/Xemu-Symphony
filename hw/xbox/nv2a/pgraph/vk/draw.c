@@ -1931,10 +1931,27 @@ void pgraph_vk_set_surface_dirty(PGRAPHState *pg, bool color, bool zeta)
     }
 }
 
-static bool ensure_buffer_space(PGRAPHState *pg, int index, VkDeviceSize size)
+static bool ensure_buffer_space(PGRAPHState *pg, int index, VkDeviceSize size,
+                                VkDeviceAddress alignment)
 {
-    if (!pgraph_vk_buffer_has_space_for(pg, index, size, 1)) {
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    StorageBuffer *buffer = &r->storage_buffers[index];
+    VkDeviceSize required_size = pgraph_vk_buffer_required_size(
+        pg, index, size, alignment);
+
+    assert(required_size >= size);
+
+    if (!pgraph_vk_buffer_has_space_for(pg, index, size, alignment)) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+        pgraph_vk_ensure_buffer_pair_capacity(pg, index, required_size);
+        return true;
+    }
+
+    if (buffer->buffer == VK_NULL_HANDLE || buffer->buffer_size < size) {
+        if (r->in_command_buffer || r->in_aux_command_buffer) {
+            pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+        }
+        pgraph_vk_ensure_buffer_pair_capacity(pg, index, required_size);
         return true;
     }
 
@@ -2038,10 +2055,8 @@ static VertexBufferRemap remap_unaligned_attributes(PGRAPHState *pg,
     // reserve space
     if (remap.attributes) {
         StorageBuffer *buffer = &r->storage_buffers[BUFFER_VERTEX_INLINE_STAGING];
-        VkDeviceSize starting_offset = ROUND_UP(buffer->buffer_offset, 16);
-        size_t total_space_required =
-            (starting_offset - buffer->buffer_offset) + remap.buffer_space_required;
-        ensure_buffer_space(pg, BUFFER_VERTEX_INLINE_STAGING, total_space_required);
+        ensure_buffer_space(pg, BUFFER_VERTEX_INLINE_STAGING,
+                            remap.buffer_space_required, 256);
         buffer->buffer_offset = ROUND_UP(buffer->buffer_offset, 16);
     }
 
@@ -2184,7 +2199,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
         size_t index_data_size =
             pg->inline_elements_length * sizeof(pg->inline_elements[0]);
 
-        ensure_buffer_space(pg, BUFFER_INDEX_STAGING, index_data_size);
+        ensure_buffer_space(pg, BUFFER_INDEX_STAGING, index_data_size, 1);
 
         uint32_t min_element = (uint32_t)-1;
         uint32_t max_element = 0;
@@ -2239,7 +2254,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
             attr->inline_buffer_populated = false;
             offset += vertex_data_size;
         }
-        ensure_buffer_space(pg, BUFFER_VERTEX_INLINE_STAGING, offset);
+        ensure_buffer_space(pg, BUFFER_VERTEX_INLINE_STAGING, offset, 1);
 
         begin_pre_draw(pg);
         VkDeviceSize buffer_offset = pgraph_vk_update_vertex_inline_buffer(
@@ -2259,7 +2274,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
 
         VkDeviceSize inline_array_data_size = pg->inline_array_length * 4;
         ensure_buffer_space(pg, BUFFER_VERTEX_INLINE_STAGING,
-                               inline_array_data_size);
+                            inline_array_data_size, 1);
 
         unsigned int offset = 0;
         for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
