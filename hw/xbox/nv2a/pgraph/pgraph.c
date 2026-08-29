@@ -2748,8 +2748,8 @@ static bool pgraph_method_array_bulk(NV2AState *d, PGRAPHState *pg,
     }
 
     nv2a_profile_inc_counter(NV2A_PROF_PGRAPH_ARRAY_BULK_PACKETS);
-    nv2a_profile_add_frame_counter(NV2A_PROF_PGRAPH_ARRAY_BULK_WORDS,
-                                   num_words_available);
+    nv2a_profile_add_counter(NV2A_PROF_PGRAPH_ARRAY_BULK_WORDS,
+                             num_words_available);
     return true;
 }
 

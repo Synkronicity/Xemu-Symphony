@@ -157,6 +157,12 @@ static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
     g_nv2a_stats.frame_working.counters[cnt] += 1;
 }
 
+static inline void nv2a_profile_add_counter(enum NV2A_PROF_COUNTERS_ENUM cnt,
+                                            int value)
+{
+    g_nv2a_stats.frame_working.counters[cnt] += value;
+}
+
 #ifdef CONFIG_RENDERDOC
 void nv2a_dbg_renderdoc_init(void);
 void *nv2a_dbg_renderdoc_get_api(void);
