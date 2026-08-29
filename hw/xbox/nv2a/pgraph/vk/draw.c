@@ -1484,6 +1484,7 @@ static void begin_draw(PGRAPHState *pg)
         nv2a_profile_inc_counter(NV2A_PROF_PIPELINE_BIND);
         vkCmdBindPipeline(r->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           r->pipeline_binding->pipeline);
+        pgraph_vk_blend_constants_cache_pipeline_bound(&r->blend_constants);
         r->pipeline_binding->draw_time = pg->draw_time;
 
         unsigned int vp_width = pg->surface_binding_dim.width,
@@ -1534,7 +1535,9 @@ static void begin_draw(PGRAPHState *pg)
          * The cache is scoped to this command buffer and invalidated by the
          * partial-clear path when it overwrites the Vulkan dynamic state.
          */
-        update_blend_constants(pg);
+        if (r->pipeline_binding->has_dynamic_blend_constants) {
+            update_blend_constants(pg);
+        }
 
         bind_descriptor_sets(pg);
         push_vertex_attr_values(pg);

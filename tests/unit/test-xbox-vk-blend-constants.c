@@ -33,6 +33,33 @@ static void test_invalidation_forces_emit(void)
     g_assert_true(pgraph_vk_blend_constants_cache_update(&cache, 0x89abcdef));
 }
 
+static void test_dynamic_static_dynamic_transition(void)
+{
+    PGRAPHVkBlendConstantsCache cache = {0};
+
+    pgraph_vk_blend_constants_cache_pipeline_bound(&cache);
+    g_assert_true(pgraph_vk_blend_constants_cache_update(&cache, 0x10203040));
+    g_assert_false(pgraph_vk_blend_constants_cache_update(&cache, 0x10203040));
+
+    /* Bind a static-state pipeline, then return to a dynamic-state pipeline. */
+    pgraph_vk_blend_constants_cache_pipeline_bound(&cache);
+    pgraph_vk_blend_constants_cache_pipeline_bound(&cache);
+    g_assert_true(pgraph_vk_blend_constants_cache_update(&cache, 0x10203040));
+}
+
+static void test_dynamic_clear_dynamic_transition(void)
+{
+    PGRAPHVkBlendConstantsCache cache = {0};
+
+    pgraph_vk_blend_constants_cache_pipeline_bound(&cache);
+    g_assert_true(pgraph_vk_blend_constants_cache_update(&cache, 0x50607080));
+
+    /* Full/depth clear binds a pipeline without setting blend constants. */
+    pgraph_vk_blend_constants_cache_pipeline_bound(&cache);
+    pgraph_vk_blend_constants_cache_pipeline_bound(&cache);
+    g_assert_true(pgraph_vk_blend_constants_cache_update(&cache, 0x50607080));
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -42,6 +69,10 @@ int main(int argc, char **argv)
                     test_identical_value_skips);
     g_test_add_func("/xbox/vulkan/blend-constants/invalidation",
                     test_invalidation_forces_emit);
+    g_test_add_func("/xbox/vulkan/blend-constants/dynamic-static-dynamic",
+                    test_dynamic_static_dynamic_transition);
+    g_test_add_func("/xbox/vulkan/blend-constants/dynamic-clear-dynamic",
+                    test_dynamic_clear_dynamic_transition);
 
     return g_test_run();
 }

@@ -18,6 +18,13 @@ static inline void pgraph_vk_blend_constants_cache_invalidate(
     cache->valid = false;
 }
 
+/* A graphics pipeline bind invalidates all cached dynamic-state assumptions. */
+static inline void pgraph_vk_blend_constants_cache_pipeline_bound(
+    PGRAPHVkBlendConstantsCache *cache)
+{
+    pgraph_vk_blend_constants_cache_invalidate(cache);
+}
+
 /* Returns true exactly when the caller must emit vkCmdSetBlendConstants. */
 static inline bool pgraph_vk_blend_constants_cache_update(
     PGRAPHVkBlendConstantsCache *cache, uint32_t guest_color)
