@@ -66,7 +66,7 @@ typedef struct PipelineKey {
     bool clear;
     RenderPassState render_pass_state;
     ShaderState shader_state;
-    uint32_t regs[9];
+    uint32_t regs[8];
     VkVertexInputBindingDescription binding_descriptions[NV2A_VERTEXSHADER_ATTRIBUTES];
     VkVertexInputAttributeDescription attribute_descriptions[NV2A_VERTEXSHADER_ATTRIBUTES];
 } PipelineKey;
@@ -79,7 +79,7 @@ typedef struct PipelineBinding {
     VkRenderPass render_pass;
     unsigned int draw_time;
     bool has_dynamic_line_width;
-    bool has_dynamic_blend_constants;
+    uint32_t dynamic_blend_constant_mask;
 } PipelineBinding;
 
 enum Buffer {
