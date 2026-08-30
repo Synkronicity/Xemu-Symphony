@@ -446,28 +446,31 @@ static bool update_uniform_rows(ShaderUniformLayout *layout, int loc,
                                 uint32_t values[][4], bool dirty[],
                                 unsigned int row_count, bool full_update)
 {
-    bool changed = false;
-
     /*
      * Every source-array writer marks its row dirty. A binding change still
      * needs a full copy because the selected layout may hold another binding's
      * previous values.
      */
-    if (loc != -1) {
-        if (full_update) {
-            changed = uniform_copy(layout, loc, values, sizeof(uint32_t),
-                                   row_count * 4);
-        } else {
-            for (unsigned int row = 0; row < row_count; row++) {
-                if (dirty[row]) {
-                    changed |= uniform_copy_array_element(
-                        layout, loc, row, values[row], sizeof(uint32_t));
-                }
-            }
-        }
+    if (loc == -1) {
+        memset(dirty, 0, row_count * sizeof(*dirty));
+        return false;
     }
 
-    memset(dirty, 0, row_count * sizeof(*dirty));
+    if (full_update) {
+        bool changed = uniform_copy(layout, loc, values, sizeof(uint32_t),
+                                    row_count * 4);
+        memset(dirty, 0, row_count * sizeof(*dirty));
+        return changed;
+    }
+
+    bool changed = false;
+    for (unsigned int row = 0; row < row_count; row++) {
+        if (dirty[row]) {
+            changed |= uniform_copy_array_element(
+                layout, loc, row, values[row], sizeof(uint32_t));
+            dirty[row] = false;
+        }
+    }
     return changed;
 }
 
