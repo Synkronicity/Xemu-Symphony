@@ -19,8 +19,13 @@
 
 #include "renderer.h"
 
-static const size_t BUFFER_VERTEX_INLINE_INITIAL_SIZE = 16 * MiB;
-static const size_t BUFFER_GROWTH_ALIGNMENT = 4 * MiB;
+/*
+ * Sustained mixed inline-vertex tests found 8 MiB to be the smallest initial
+ * pair with lower final allocation and no measurable loss versus 4, 16, or
+ * 32 MiB. Later growth uses the exact required size; Vulkan does not require
+ * whole-MiB buffer sizes.
+ */
+static const size_t BUFFER_VERTEX_INLINE_INITIAL_SIZE = 8 * MiB;
 
 static bool buffer_is_persistently_mapped(int index)
 {
@@ -73,19 +78,6 @@ static void destroy_buffer(PGRAPHState *pg, StorageBuffer *buffer)
     buffer->allocation = VK_NULL_HANDLE;
 }
 
-static size_t buffer_growth_target(size_t required_size)
-{
-    size_t headroom = required_size / 4;
-
-    headroom = MAX(headroom, 4 * MiB);
-    headroom = MIN(headroom, 16 * MiB);
-    assert(required_size <= SIZE_MAX - headroom);
-
-    size_t target = required_size + headroom;
-    assert(target <= SIZE_MAX - (BUFFER_GROWTH_ALIGNMENT - 1));
-    return ROUND_UP(target, BUFFER_GROWTH_ALIGNMENT);
-}
-
 static void resize_buffer(PGRAPHState *pg, int index, size_t size)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -132,9 +124,7 @@ void pgraph_vk_ensure_buffer_pair_capacity(PGRAPHState *pg, int index,
 
     size_t new_size = MAX(buffer->buffer_size, paired->buffer_size);
     new_size = MAX(new_size, BUFFER_VERTEX_INLINE_INITIAL_SIZE);
-    if (new_size < required_size) {
-        new_size = buffer_growth_target(required_size);
-    }
+    new_size = MAX(new_size, required_size);
 
     if (buffer->buffer == VK_NULL_HANDLE || buffer->buffer_size < new_size) {
         resize_buffer(pg, index, new_size);

@@ -2000,6 +2000,9 @@ typedef struct VertexBufferRemap {
     } map[NV2A_VERTEXSHADER_ATTRIBUTES];
 } VertexBufferRemap;
 
+/* Maximum NV2A vertex attribute width: four 32-bit components. */
+static const VkDeviceSize REMAPPED_VERTEX_BLOCK_ALIGNMENT = 4 * sizeof(float);
+
 static VertexBufferRemap remap_unaligned_attributes(PGRAPHState *pg,
                                                     uint32_t num_vertices)
 {
@@ -2056,8 +2059,10 @@ static VertexBufferRemap remap_unaligned_attributes(PGRAPHState *pg,
     if (remap.attributes) {
         StorageBuffer *buffer = &r->storage_buffers[BUFFER_VERTEX_INLINE_STAGING];
         ensure_buffer_space(pg, BUFFER_VERTEX_INLINE_STAGING,
-                            remap.buffer_space_required, 256);
-        buffer->buffer_offset = ROUND_UP(buffer->buffer_offset, 16);
+                            remap.buffer_space_required,
+                            REMAPPED_VERTEX_BLOCK_ALIGNMENT);
+        buffer->buffer_offset = ROUND_UP(buffer->buffer_offset,
+                                         REMAPPED_VERTEX_BLOCK_ALIGNMENT);
     }
 
     return remap;
@@ -2087,7 +2092,8 @@ static void copy_remapped_attributes_to_inline_buffer(PGRAPHState *pg,
     }
 
     assert(pgraph_vk_buffer_has_space_for(pg, BUFFER_VERTEX_INLINE_STAGING,
-                                          remap.buffer_space_required, 256));
+                                          remap.buffer_space_required,
+                                          REMAPPED_VERTEX_BLOCK_ALIGNMENT));
 
     // FIXME: SIMD memcpy
     // FIXME: Caching
