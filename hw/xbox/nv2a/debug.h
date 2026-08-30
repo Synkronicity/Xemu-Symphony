@@ -114,12 +114,6 @@
     _X(NV2A_PROF_QUEUE_SUBMIT_3) \
     _X(NV2A_PROF_QUEUE_SUBMIT_4) \
     _X(NV2A_PROF_QUEUE_SUBMIT_5) \
-    _X(NV2A_PROF_PGRAPH_ARRAY_BULK_PACKETS) \
-    _X(NV2A_PROF_PGRAPH_ARRAY_BULK_WORDS) \
-    _X(NV2A_PROF_PGRAPH_ARRAY_SCALAR_FALLBACK_PACKETS) \
-    _X(NV2A_PROF_PGRAPH_ARRAY_SCALAR_FALLBACK_TRACE) \
-    _X(NV2A_PROF_PGRAPH_ARRAY_SCALAR_FALLBACK_SHORT) \
-    _X(NV2A_PROF_PGRAPH_ARRAY_SCALAR_FALLBACK_INCREMENTING) \
 
 enum NV2A_PROF_COUNTERS_ENUM {
     #define _X(x) x,
@@ -155,12 +149,6 @@ void nv2a_profile_flip_stall(void);
 static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
 {
     g_nv2a_stats.frame_working.counters[cnt] += 1;
-}
-
-static inline void nv2a_profile_add_counter(enum NV2A_PROF_COUNTERS_ENUM cnt,
-                                            int value)
-{
-    g_nv2a_stats.frame_working.counters[cnt] += value;
 }
 
 #ifdef CONFIG_RENDERDOC

@@ -646,14 +646,6 @@ static bool pgraph_method_array_bulk(NV2AState *d, PGRAPHState *pg,
                                      uint32_t *parameters,
                                      size_t num_words_available);
 
-static void pgraph_method_array_scalar_fallback(
-    enum NV2A_PROF_COUNTERS_ENUM reason)
-{
-    nv2a_profile_inc_counter(
-        NV2A_PROF_PGRAPH_ARRAY_SCALAR_FALLBACK_PACKETS);
-    nv2a_profile_inc_counter(reason);
-}
-
 static void pgraph_method_non_inc(MethodFunc handler, METHOD_HANDLER_ARG_DECL)
 {
     bool array_packet = method == NV097_ARRAY_ELEMENT16 ||
@@ -662,21 +654,13 @@ static void pgraph_method_non_inc(MethodFunc handler, METHOD_HANDLER_ARG_DECL)
 
     if (array_packet) {
         PGRAPHInlinePacketMode mode = pgraph_inline_packet_mode(
-            inc, pgraph_method_trace_enabled(), num_words_available);
+            inc, pgraph_method_trace_enabled());
 
         switch (mode) {
         case PGRAPH_INLINE_PACKET_SCALAR_INCREMENTING:
-            pgraph_method_array_scalar_fallback(
-                NV2A_PROF_PGRAPH_ARRAY_SCALAR_FALLBACK_INCREMENTING);
             handler(METHOD_HANDLER_ARGS);
             return;
         case PGRAPH_INLINE_PACKET_SCALAR_TRACE:
-            pgraph_method_array_scalar_fallback(
-                NV2A_PROF_PGRAPH_ARRAY_SCALAR_FALLBACK_TRACE);
-            break;
-        case PGRAPH_INLINE_PACKET_SCALAR_SHORT:
-            pgraph_method_array_scalar_fallback(
-                NV2A_PROF_PGRAPH_ARRAY_SCALAR_FALLBACK_SHORT);
             break;
         case PGRAPH_INLINE_PACKET_BULK:
             if (pgraph_method_array_bulk(d, pg, method, parameters,
@@ -2735,21 +2719,20 @@ static bool pgraph_method_array_bulk(NV2AState *d, PGRAPHState *pg,
                                      values_per_word,
                                      NV2A_MAX_BATCH_LENGTH));
 
+    size_t output_length = *length;
     if (method == NV097_ARRAY_ELEMENT16) {
         for (size_t i = 0; i < num_words_available; i++) {
             uint32_t value = ldl_le_p(parameters + i);
-            pgraph_inline_element16_store(destination + *length, value);
-            *length += 2;
+            pgraph_inline_element16_store(destination + output_length, value);
+            output_length += 2;
         }
     } else {
         for (size_t i = 0; i < num_words_available; i++) {
-            destination[(*length)++] = ldl_le_p(parameters + i);
+            destination[output_length++] = ldl_le_p(parameters + i);
         }
     }
 
-    nv2a_profile_inc_counter(NV2A_PROF_PGRAPH_ARRAY_BULK_PACKETS);
-    nv2a_profile_add_counter(NV2A_PROF_PGRAPH_ARRAY_BULK_WORDS,
-                             num_words_available);
+    *length = output_length;
     return true;
 }
 

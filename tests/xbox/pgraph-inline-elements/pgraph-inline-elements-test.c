@@ -13,15 +13,13 @@
 
 static void test_packet_modes(void)
 {
-    assert(pgraph_inline_packet_mode(false, false, 8) ==
+    assert(pgraph_inline_packet_mode(false, false) ==
            PGRAPH_INLINE_PACKET_BULK);
-    assert(pgraph_inline_packet_mode(true, false, 8) ==
+    assert(pgraph_inline_packet_mode(true, false) ==
            PGRAPH_INLINE_PACKET_SCALAR_INCREMENTING);
-    assert(pgraph_inline_packet_mode(false, true, 8) ==
+    assert(pgraph_inline_packet_mode(false, true) ==
            PGRAPH_INLINE_PACKET_SCALAR_TRACE);
-    assert(pgraph_inline_packet_mode(false, false, 1) ==
-           PGRAPH_INLINE_PACKET_SCALAR_SHORT);
-    assert(pgraph_inline_packet_mode(true, true, 1) ==
+    assert(pgraph_inline_packet_mode(true, true) ==
            PGRAPH_INLINE_PACKET_SCALAR_INCREMENTING);
 }
 
