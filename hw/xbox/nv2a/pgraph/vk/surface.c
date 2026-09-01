@@ -655,6 +655,11 @@ static void invalidate_surface(NV2AState *d, SurfaceBinding *surface)
 {
     PGRAPHVkState *r = d->pgraph.vk_renderer_state;
 
+    if (r->display.reuse.valid &&
+        r->display.reuse.surface_lifetime_id == surface->lifetime_id) {
+        r->display.reuse.valid = false;
+    }
+
     trace_nv2a_pgraph_surface_invalidated(surface->vram_addr);
 
     // FIXME: We may be reading from the surface in the current command buffer!
@@ -973,6 +978,11 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
 
     if (!(surface->upload_pending || force)) {
         return;
+    }
+
+    if (r->display.reuse.valid &&
+        r->display.reuse.surface_lifetime_id == surface->lifetime_id) {
+        r->display.reuse.valid = false;
     }
 
     nv2a_profile_inc_counter(NV2A_PROF_SURF_UPLOAD);
@@ -1549,6 +1559,10 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
             }
 
             *surface = target;
+            surface->lifetime_id = ++r->next_surface_lifetime_id;
+            if (surface->lifetime_id == 0) {
+                surface->lifetime_id = ++r->next_surface_lifetime_id;
+            }
             set_surface_label(pg, surface);
             surface_put(d, surface);
 

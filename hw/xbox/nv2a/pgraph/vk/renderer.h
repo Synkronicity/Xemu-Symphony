@@ -145,6 +145,9 @@ typedef struct SurfaceBinding {
     VmaAllocation allocation_scratch;
 
     bool initialized;
+
+    /* Identifies this logical binding even when its allocation is recycled. */
+    uint64_t lifetime_id;
 } SurfaceBinding;
 
 typedef struct ShaderModuleInfo {
@@ -288,6 +291,19 @@ typedef struct PGRAPHVkDisplayState {
     int width, height;
     int draw_time;
 
+    struct {
+        bool valid;
+        uint64_t surface_lifetime_id;
+        int surface_draw_time;
+        int guest_frame_time;
+        hwaddr scanout_address;
+        uint32_t vga_line_offset;
+        uint32_t display_width;
+        uint32_t display_height;
+        uint32_t surface_scale_factor;
+        uint8_t interlace_mode;
+    } reuse;
+
     // OpenGL Interop
 #ifdef WIN32
     HANDLE handle;
@@ -352,6 +368,8 @@ typedef struct PGRAPHVkState {
 
     VkCommandBuffer aux_command_buffer;
     bool in_aux_command_buffer;
+
+    uint64_t next_surface_lifetime_id;
 
     VkFramebuffer framebuffers[50];
     int framebuffer_index;
