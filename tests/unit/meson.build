@@ -20,6 +20,7 @@ tests = {
   'test-string-output-visitor': [testqapi],
   'test-visitor-serialization': [testqapi],
   'test-bitmap': [],
+  'test-xbox-pgraph-texture-state': [],
   'test-xbox-pgraph-uniform-dirty': [],
   'test-xbox-vk-blend-constants': [],
   'test-resv-mem': [],

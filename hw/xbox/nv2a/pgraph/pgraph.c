@@ -25,6 +25,7 @@
 #include "ui/xemu-notifications.h"
 #include "ui/xemu-settings.h"
 #include "inline-elements.h"
+#include "texture-state.h"
 #include "util.h"
 #include "swizzle.h"
 #include "nv2a_vsh_emulator.h"
@@ -1207,6 +1208,7 @@ DEF_METHOD(NV097, SET_TEXTURE_ADDRESS)
 {
     int slot = (method - NV097_SET_TEXTURE_ADDRESS) / 64;
     pgraph_reg_w(pg, NV_PGRAPH_TEXADDRESS0 + slot * 4, parameter);
+    pgraph_texture_stage_invalidate(pg->texture_dirty, slot);
 }
 
 DEF_METHOD(NV097, SET_CONTROL0)
@@ -2674,6 +2676,7 @@ DEF_METHOD(NV097, SET_TEXTURE_BORDER_COLOR)
 {
     int slot = (method - NV097_SET_TEXTURE_BORDER_COLOR) / 64;
     pgraph_reg_w(pg, NV_PGRAPH_BORDERCOLOR0 + slot * 4, parameter);
+    pgraph_texture_stage_invalidate(pg->texture_dirty, slot);
 }
 
 DEF_METHOD(NV097, SET_TEXTURE_SET_BUMP_ENV_MAT)
