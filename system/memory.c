@@ -2644,6 +2644,17 @@ void memory_region_enable_lockless_io(MemoryRegion *mr)
     mr->disable_reentrancy_guard = true;
 }
 
+void memory_region_set_lockless_read(MemoryRegion *mr,
+                                     MemoryRegionLocklessRead predicate)
+{
+    mr->lockless_read = predicate;
+    /*
+     * The device-wide reentrancy guard is not safe for concurrent access.
+     * All accesses not accepted by the predicate remain BQL serialized.
+     */
+    mr->disable_reentrancy_guard = true;
+}
+
 void memory_region_add_eventfd(MemoryRegion *mr,
                                hwaddr addr,
                                unsigned size,

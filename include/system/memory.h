@@ -76,6 +76,8 @@ static inline void fuzz_dma_read_cb(size_t addr,
 extern unsigned int global_dirty_tracking;
 
 typedef struct MemoryRegionOps MemoryRegionOps;
+typedef bool (*MemoryRegionLocklessRead)(void *opaque, hwaddr addr,
+                                         unsigned int size);
 
 struct ReservedRegion {
     Range range;
@@ -844,6 +846,7 @@ struct MemoryRegion {
 
     const MemoryRegionOps *ops;
     void *opaque;
+    MemoryRegionLocklessRead lockless_read;
     MemoryRegion *container;
     int mapped_via_alias; /* Mapped via an alias, container might be NULL */
     Int128 size;
@@ -2377,6 +2380,16 @@ void memory_region_clear_flush_coalesced(MemoryRegion *mr);
  * @mr: the memory region to be updated.
  */
 void memory_region_enable_lockless_io(MemoryRegion *mr);
+
+/**
+ * memory_region_set_lockless_read: Enable BQL-free selected reads.
+ *
+ * The predicate is called before dispatch and must return true only when the
+ * device read callback provides all synchronization required for @addr and
+ * @size. Other reads and all writes retain normal BQL serialization.
+ */
+void memory_region_set_lockless_read(MemoryRegion *mr,
+                                     MemoryRegionLocklessRead predicate);
 
 /**
  * memory_region_add_eventfd: Request an eventfd to be triggered when a word

@@ -2022,6 +2022,13 @@ static uint64_t do_ld_mmio_beN(CPUState *cpu, CPUTLBEntryFull *full,
     section = io_prepare(&mr_offset, cpu, full->xlat_section, attrs, addr, ra);
     mr = section->mr;
 
+    if (mr->lockless_io ||
+        (mr->lockless_read && mr->lockless_read(mr->opaque, mr_offset,
+                                                size))) {
+        return int_ld_mmio_beN(cpu, full, ret_be, addr, size, mmu_idx,
+                               type, ra, mr, mr_offset);
+    }
+
     BQL_LOCK_GUARD();
     return int_ld_mmio_beN(cpu, full, ret_be, addr, size, mmu_idx,
                            type, ra, mr, mr_offset);
@@ -2042,6 +2049,16 @@ static Int128 do_ld16_mmio_beN(CPUState *cpu, CPUTLBEntryFull *full,
     attrs = full->attrs;
     section = io_prepare(&mr_offset, cpu, full->xlat_section, attrs, addr, ra);
     mr = section->mr;
+
+    if (mr->lockless_io ||
+        (mr->lockless_read && mr->lockless_read(mr->opaque, mr_offset,
+                                                size))) {
+        a = int_ld_mmio_beN(cpu, full, ret_be, addr, size - 8, mmu_idx,
+                            MMU_DATA_LOAD, ra, mr, mr_offset);
+        b = int_ld_mmio_beN(cpu, full, ret_be, addr + size - 8, 8, mmu_idx,
+                            MMU_DATA_LOAD, ra, mr, mr_offset + size - 8);
+        return int128_make128(b, a);
+    }
 
     BQL_LOCK_GUARD();
     a = int_ld_mmio_beN(cpu, full, ret_be, addr, size - 8, mmu_idx,
