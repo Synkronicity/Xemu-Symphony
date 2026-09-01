@@ -143,7 +143,7 @@ LruNode *lru_evict_one(Lru *lru)
 }
 
 static inline
-LruNode *lru_get_one_free(Lru *lru)
+LruNode *lru_try_get_one_free(Lru *lru)
 {
 	LruNode *found;
 
@@ -157,7 +157,17 @@ LruNode *lru_get_one_free(Lru *lru)
 		}
 	}
 
-	return lru_evict_one(lru);
+	return lru_try_evict_one(lru);
+}
+
+static inline
+LruNode *lru_get_one_free(Lru *lru)
+{
+	LruNode *found = lru_try_get_one_free(lru);
+
+	assert(found != NULL); /* No free or evictable node! */
+
+	return found;
 }
 
 static inline
@@ -176,7 +186,7 @@ bool lru_contains_hash(Lru *lru, uint64_t hash)
 }
 
 static inline
-LruNode *lru_lookup(Lru *lru, uint64_t hash, const void *key)
+LruNode *lru_try_lookup(Lru *lru, uint64_t hash, const void *key)
 {
 	unsigned int bin = lru_hash_to_bin(lru, hash);
 	LruNode *iter, *found = NULL;
@@ -191,7 +201,10 @@ LruNode *lru_lookup(Lru *lru, uint64_t hash, const void *key)
 	if (found) {
 		QTAILQ_REMOVE(&lru->bins[bin], found, next_bin);
 	} else {
-		found = lru_get_one_free(lru);
+		found = lru_try_get_one_free(lru);
+		if (!found) {
+			return NULL;
+		}
 		found->hash = hash;
 		if (lru->init_node) {
 			lru->init_node(lru, found, key);
@@ -205,6 +218,16 @@ LruNode *lru_lookup(Lru *lru, uint64_t hash, const void *key)
 	QTAILQ_REMOVE(&lru->global, found, next_global);
 	QTAILQ_INSERT_HEAD(&lru->global, found, next_global);
 	QTAILQ_INSERT_HEAD(&lru->bins[bin], found, next_bin);
+
+	return found;
+}
+
+static inline
+LruNode *lru_lookup(Lru *lru, uint64_t hash, const void *key)
+{
+	LruNode *found = lru_try_lookup(lru, hash, key);
+
+	assert(found != NULL); /* No free or evictable node! */
 
 	return found;
 }

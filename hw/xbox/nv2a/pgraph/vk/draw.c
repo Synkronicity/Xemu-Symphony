@@ -18,8 +18,10 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/error-report.h"
 #include "qemu/fast-hash.h"
 #include "renderer.h"
+#include "pipeline-cache-lifetime.h"
 #include <math.h>
 
 void pgraph_vk_draw_begin(NV2AState *d)
@@ -103,8 +105,9 @@ static void pipeline_cache_entry_post_evict(Lru *lru, LruNode *node)
     PGRAPHVkState *r = container_of(lru, PGRAPHVkState, pipeline_cache);
     PipelineBinding *snode = container_of(node, PipelineBinding, node);
 
-    assert((!r->in_command_buffer ||
-            snode->draw_time < r->command_buffer_start_time) &&
+    assert(pgraph_vk_graphics_pipeline_can_evict(
+               r->in_command_buffer, snode->draw_time,
+               r->command_buffer_start_time) &&
            "Pipeline evicted while in use!");
 
     vkDestroyPipeline(r->device, snode->pipeline, NULL);
@@ -112,6 +115,16 @@ static void pipeline_cache_entry_post_evict(Lru *lru, LruNode *node)
 
     vkDestroyPipelineLayout(r->device, snode->layout, NULL);
     snode->layout = VK_NULL_HANDLE;
+}
+
+static bool pipeline_cache_entry_pre_evict(Lru *lru, LruNode *node)
+{
+    PGRAPHVkState *r = container_of(lru, PGRAPHVkState, pipeline_cache);
+    PipelineBinding *snode = container_of(node, PipelineBinding, node);
+
+    return pgraph_vk_graphics_pipeline_can_evict(
+        r->in_command_buffer, snode->draw_time,
+        r->command_buffer_start_time);
 }
 
 static bool pipeline_cache_entry_compare(Lru *lru, LruNode *node,
@@ -146,7 +159,26 @@ static void init_pipeline_cache(PGRAPHState *pg)
 
     r->pipeline_cache.init_node = pipeline_cache_entry_init;
     r->pipeline_cache.compare_nodes = pipeline_cache_entry_compare;
+    r->pipeline_cache.pre_node_evict = pipeline_cache_entry_pre_evict;
     r->pipeline_cache.post_node_evict = pipeline_cache_entry_post_evict;
+}
+
+static PipelineBinding *pipeline_cache_lookup(PGRAPHState *pg, uint64_t hash,
+                                              const PipelineKey *key)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    LruNode *node = lru_try_lookup(&r->pipeline_cache, hash, key);
+
+    if (!node) {
+        pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+        node = lru_try_lookup(&r->pipeline_cache, hash, key);
+    }
+    if (!node) {
+        error_report("Vulkan graphics pipeline cache has no evictable entry");
+        abort();
+    }
+
+    return container_of(node, PipelineBinding, node);
 }
 
 static void finalize_pipeline_cache(PGRAPHState *pg)
@@ -435,8 +467,7 @@ static void create_clear_pipeline(PGRAPHState *pg)
     key.regs[0] = r->clear_parameter;
 
     uint64_t hash = fast_hash((void *)&key, sizeof(key));
-    LruNode *node = lru_lookup(&r->pipeline_cache, hash, &key);
-    PipelineBinding *snode = container_of(node, PipelineBinding, node);
+    PipelineBinding *snode = pipeline_cache_lookup(pg, hash, &key);
 
     if (snode->pipeline != VK_NULL_HANDLE) {
         NV2A_VK_DPRINTF("Cache hit");
@@ -747,8 +778,7 @@ static void create_pipeline(PGRAPHState *pg)
     init_pipeline_key(pg, &key);
     uint64_t hash = fast_hash((void *)&key, sizeof(key));
 
-    LruNode *node = lru_lookup(&r->pipeline_cache, hash, &key);
-    PipelineBinding *snode = container_of(node, PipelineBinding, node);
+    PipelineBinding *snode = pipeline_cache_lookup(pg, hash, &key);
     if (snode->pipeline != VK_NULL_HANDLE) {
         NV2A_VK_DPRINTF("Cache hit");
         r->pipeline_binding_changed = r->pipeline_binding != snode;
