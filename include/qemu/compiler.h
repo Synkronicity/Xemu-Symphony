@@ -219,6 +219,18 @@
 #endif
 
 /*
+ * Disable -fzero-call-used-regs for a function whose caller already treats
+ * every ABI call-clobbered register as destroyed.  Do not use this on an
+ * interface where register contents may cross a trust boundary.
+ */
+#if __has_attribute(zero_call_used_regs)
+# define QEMU_SKIP_ZERO_CALL_USED_REGS \
+    __attribute__((zero_call_used_regs("skip")))
+#else
+# define QEMU_SKIP_ZERO_CALL_USED_REGS
+#endif
+
+/*
  * http://clang.llvm.org/docs/ThreadSafetyAnalysis.html
  *
  * TSA is available since clang 3.6-ish.

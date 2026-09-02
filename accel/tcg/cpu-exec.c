@@ -436,8 +436,9 @@ const void *HELPER(lookup_tb_ptr)(CPUArchState *env)
  * state which remains valid across the jump.  Avoid reconstructing those
  * values through the target callback on every indirect jump-cache hit.
  */
-const void *HELPER(lookup_tb_ptr_i32)(CPUArchState *env, uint32_t eip,
-                                      uint64_t cs_base, uint32_t flags)
+const void *QEMU_SKIP_ZERO_CALL_USED_REGS
+HELPER(lookup_tb_ptr_i32)(CPUArchState *env, uint32_t eip,
+                          uint64_t cs_base, uint32_t flags)
 {
     CPUState *cpu = env_cpu(env);
     TCGTBCPUState s = {
