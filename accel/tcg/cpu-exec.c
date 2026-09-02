@@ -385,17 +385,8 @@ static inline bool check_for_breakpoints(CPUState *cpu, vaddr pc,
         check_for_breakpoints_slow(cpu, pc, cflags);
 }
 
-/**
- * helper_lookup_tb_ptr: quick check for next tb
- * @env: current cpu state
- *
- * Look for an existing TB matching the current cpu state.
- * If found, return the code pointer.  If not found, return
- * the tcg epilogue so that we return into cpu_tb_exec.
- */
-const void *HELPER(lookup_tb_ptr)(CPUArchState *env)
+static const void *lookup_tb_ptr_common(CPUState *cpu, TCGTBCPUState s)
 {
-    CPUState *cpu = env_cpu(env);
     TranslationBlock *tb;
 
     /*
@@ -406,9 +397,6 @@ const void *HELPER(lookup_tb_ptr)(CPUArchState *env)
      * The next TB, if we chain to it, will clear the flag again.
      */
     cpu->neg.can_do_io = true;
-
-    TCGTBCPUState s = cpu->cc->tcg_ops->get_tb_cpu_state(cpu);
-    s.cflags = curr_cflags(cpu);
 
     if (check_for_breakpoints(cpu, s.pc, &s.cflags)) {
         cpu_loop_exit(cpu);
@@ -424,6 +412,42 @@ const void *HELPER(lookup_tb_ptr)(CPUArchState *env)
     }
 
     return tb->tc.ptr;
+}
+
+/**
+ * helper_lookup_tb_ptr: quick check for next tb
+ * @env: current cpu state
+ *
+ * Look for an existing TB matching the current cpu state.
+ * If found, return the code pointer.  If not found, return
+ * the tcg epilogue so that we return into cpu_tb_exec.
+ */
+const void *HELPER(lookup_tb_ptr)(CPUArchState *env)
+{
+    CPUState *cpu = env_cpu(env);
+    TCGTBCPUState s = cpu->cc->tcg_ops->get_tb_cpu_state(cpu);
+
+    s.cflags = curr_cflags(cpu);
+    return lookup_tb_ptr_common(cpu, s);
+}
+
+/*
+ * State-preserving target jumps already know the destination PC and the TB
+ * state which remains valid across the jump.  Avoid reconstructing those
+ * values through the target callback on every indirect jump-cache hit.
+ */
+const void *HELPER(lookup_tb_ptr_i32)(CPUArchState *env, uint32_t eip,
+                                      uint64_t cs_base, uint32_t flags)
+{
+    CPUState *cpu = env_cpu(env);
+    TCGTBCPUState s = {
+        .pc = (uint32_t)(cs_base + eip),
+        .flags = flags,
+        .cflags = curr_cflags(cpu),
+        .cs_base = cs_base,
+    };
+
+    return lookup_tb_ptr_common(cpu, s);
 }
 
 /* Return the current PC from CPU, which may be cached in TB. */

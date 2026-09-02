@@ -2319,7 +2319,7 @@ static void gen_JMP_m(DisasContext *s, X86DecodedInsn *decode)
 {
     gen_op_jmp_v(s, s->T0);
     gen_bnd_jmp(s);
-    s->base.is_jmp = DISAS_JUMP;
+    s->base.is_jmp = DISAS_JUMP_STATIC;
 }
 
 static void gen_JMPF(DisasContext *s, X86DecodedInsn *decode)
@@ -3599,7 +3599,7 @@ static void gen_RET(DisasContext *s, X86DecodedInsn *decode)
     gen_stack_update(s, adjust + (1 << ot));
     gen_op_jmp_v(s, s->T0);
     gen_bnd_jmp(s);
-    s->base.is_jmp = DISAS_JUMP;
+    s->base.is_jmp = DISAS_JUMP_STATIC;
 }
 
 static void gen_RETF(DisasContext *s, X86DecodedInsn *decode)
