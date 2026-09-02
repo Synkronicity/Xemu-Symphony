@@ -822,11 +822,22 @@ extern int64_t clock_start;
    an infinite recursion! */
 #ifdef _WIN32
 extern int64_t clock_freq;
+extern uint64_t clock_ns_per_tick;
 
 static inline int64_t get_clock(void)
 {
     LARGE_INTEGER ti;
     QueryPerformanceCounter(&ti);
+
+    /*
+     * Windows commonly exposes a QPC frequency that divides one second
+     * exactly (10 MHz on current systems).  Avoid a compiler-emitted
+     * 128-bit division on every clock read when a lossless integer scale is
+     * available; retain muldiv64() for every other frequency.
+    */
+    if (clock_ns_per_tick) {
+        return (uint64_t)ti.QuadPart * clock_ns_per_tick;
+    }
     return muldiv64(ti.QuadPart, NANOSECONDS_PER_SECOND, clock_freq);
 }
 
