@@ -111,6 +111,7 @@ typedef struct StorageBuffer {
 typedef struct SurfaceBinding {
     QTAILQ_ENTRY(SurfaceBinding) entry;
     MemAccessCallback *access_cb;
+    NV2AState *d;
 
     hwaddr vram_addr;
 

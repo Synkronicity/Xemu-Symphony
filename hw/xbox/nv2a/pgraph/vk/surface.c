@@ -556,38 +556,37 @@ void pgraph_vk_download_dirty_surfaces(NV2AState *d)
     qemu_event_set(&r->dirty_surfaces_download_complete);
 }
 
+static bool surface_access_one(SurfaceBinding *surface, hwaddr addr, bool write)
+{
+    hwaddr offset = addr - surface->vram_addr;
+
+    if (write) {
+        trace_nv2a_pgraph_surface_cpu_write(surface->vram_addr, offset);
+    } else {
+        trace_nv2a_pgraph_surface_cpu_read(surface->vram_addr, offset);
+    }
+
+    if (surface->draw_dirty) {
+        surface->download_pending = true;
+    }
+
+    if (write) {
+        surface->upload_pending = true;
+    }
+
+    return surface->draw_dirty;
+}
+
 static void surface_access_callback(void *opaque, MemoryRegion *mr, hwaddr addr,
                                     hwaddr len, bool write)
 {
-    NV2AState *d = (NV2AState *)opaque;
+    SurfaceBinding *surface = (SurfaceBinding *)opaque;
+    NV2AState *d = surface->d;
+
     qemu_mutex_lock(&d->pgraph.lock);
 
     PGRAPHVkState *r = d->pgraph.vk_renderer_state;
-    bool wait_for_downloads = false;
-
-    SurfaceBinding *surface;
-    QTAILQ_FOREACH(surface, &r->surfaces, entry) {
-        if (!check_surface_overlaps_range(surface, addr, len)) {
-            continue;
-        }
-
-        hwaddr offset = addr - surface->vram_addr;
-
-        if (write) {
-            trace_nv2a_pgraph_surface_cpu_write(surface->vram_addr, offset);
-        } else {
-            trace_nv2a_pgraph_surface_cpu_read(surface->vram_addr, offset);
-        }
-
-        if (surface->draw_dirty) {
-            surface->download_pending = true;
-            wait_for_downloads = true;
-        }
-
-        if (write) {
-            surface->upload_pending = true;
-        }
-    }
+    bool wait_for_downloads = surface_access_one(surface, addr, write);
 
     qemu_mutex_unlock(&d->pgraph.lock);
 
@@ -605,9 +604,10 @@ static void register_cpu_access_callback(NV2AState *d, SurfaceBinding *surface)
 {
     if (tcg_enabled()) {
         if (surface->width && surface->height) {
+            surface->d = d;
             surface->access_cb = mem_access_callback_insert(
                 qemu_get_cpu(0), d->vram, surface->vram_addr, surface->size,
-                &surface_access_callback, d);
+                &surface_access_callback, surface);
         } else {
             surface->access_cb = NULL;
         }
