@@ -1150,6 +1150,24 @@ void physical_memory_set_dirty_range(ram_addr_t start, ram_addr_t length,
         return;
     }
 
+    if (!xen_enabled() && length &&
+        length <= TARGET_PAGE_SIZE - (start & (TARGET_PAGE_SIZE - 1))) {
+        page = start >> TARGET_PAGE_BITS;
+        idx = page / DIRTY_MEMORY_BLOCK_SIZE;
+        offset = page % DIRTY_MEMORY_BLOCK_SIZE;
+
+        WITH_RCU_READ_LOCK_GUARD() {
+            for (i = 0; i < DIRTY_MEMORY_NUM; i++) {
+                if (mask & (1 << i)) {
+                    DirtyMemoryBlocks *block =
+                        qatomic_rcu_read(&ram_list.dirty_memory[i]);
+                    set_bit_atomic(offset, block->blocks[idx]);
+                }
+            }
+        }
+        return;
+    }
+
     end = TARGET_PAGE_ALIGN(start + length) >> TARGET_PAGE_BITS;
     page = start >> TARGET_PAGE_BITS;
 
