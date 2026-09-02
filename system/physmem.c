@@ -1011,59 +1011,45 @@ void physical_memory_dirty_bits_cleared(ram_addr_t start, ram_addr_t length)
     }
 }
 
-static bool physical_memory_get_dirty(ram_addr_t start, ram_addr_t length,
-                                      unsigned client)
+bool physical_memory_get_dirty_flag(ram_addr_t addr, unsigned client)
 {
     DirtyMemoryBlocks *blocks;
-    unsigned long end, page;
-    unsigned long idx, offset, base;
-    bool dirty = false;
+    unsigned long page, idx, offset;
+    bool dirty;
 
     assert(client < DIRTY_MEMORY_NUM);
 
-    end = TARGET_PAGE_ALIGN(start + length) >> TARGET_PAGE_BITS;
-    page = start >> TARGET_PAGE_BITS;
+    page = addr >> TARGET_PAGE_BITS;
+    idx = page / DIRTY_MEMORY_BLOCK_SIZE;
+    offset = page % DIRTY_MEMORY_BLOCK_SIZE;
 
     WITH_RCU_READ_LOCK_GUARD() {
         blocks = qatomic_rcu_read(&ram_list.dirty_memory[client]);
-
-        idx = page / DIRTY_MEMORY_BLOCK_SIZE;
-        offset = page % DIRTY_MEMORY_BLOCK_SIZE;
-        base = page - offset;
-        while (page < end) {
-            unsigned long next = MIN(end, base + DIRTY_MEMORY_BLOCK_SIZE);
-            unsigned long num = next - base;
-            unsigned long found = find_next_bit(blocks->blocks[idx],
-                                                num, offset);
-            if (found < num) {
-                dirty = true;
-                break;
-            }
-
-            page = next;
-            idx++;
-            offset = 0;
-            base += DIRTY_MEMORY_BLOCK_SIZE;
-        }
+        dirty = test_bit(offset, blocks->blocks[idx]);
     }
 
     return dirty;
 }
 
-bool physical_memory_get_dirty_flag(ram_addr_t addr, unsigned client)
-{
-    return physical_memory_get_dirty(addr, 1, client);
-}
-
 bool physical_memory_is_clean(ram_addr_t addr)
 {
-    bool nv2a = physical_memory_get_dirty_flag(addr, DIRTY_MEMORY_NV2A);
-    bool nv2a_tex = physical_memory_get_dirty_flag(addr, DIRTY_MEMORY_NV2A_TEX);
-    bool vga = physical_memory_get_dirty_flag(addr, DIRTY_MEMORY_VGA);
-    bool code = physical_memory_get_dirty_flag(addr, DIRTY_MEMORY_CODE);
-    bool migration =
-        physical_memory_get_dirty_flag(addr, DIRTY_MEMORY_MIGRATION);
-    return !(nv2a && nv2a_tex && vga && code && migration);
+    unsigned long page = addr >> TARGET_PAGE_BITS;
+    unsigned long idx = page / DIRTY_MEMORY_BLOCK_SIZE;
+    unsigned long offset = page % DIRTY_MEMORY_BLOCK_SIZE;
+    bool clean = false;
+
+    WITH_RCU_READ_LOCK_GUARD() {
+        for (int client = 0; client < DIRTY_MEMORY_NUM; client++) {
+            DirtyMemoryBlocks *blocks =
+                qatomic_rcu_read(&ram_list.dirty_memory[client]);
+            if (!test_bit(offset, blocks->blocks[idx])) {
+                clean = true;
+                break;
+            }
+        }
+    }
+
+    return clean;
 }
 
 static bool physical_memory_all_dirty(ram_addr_t start, ram_addr_t length,
