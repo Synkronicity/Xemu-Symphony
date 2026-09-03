@@ -26,6 +26,8 @@ void physical_memory_set_dirty_flag(ram_addr_t addr, unsigned client);
 
 void physical_memory_set_dirty_range(ram_addr_t start, ram_addr_t length,
                                      uint8_t mask);
+void physical_memory_set_dirty_range_nocode(ram_addr_t start,
+                                            ram_addr_t length);
 
 /*
  * Contrary to physical_memory_sync_dirty_bitmap() this function returns

@@ -1239,6 +1239,39 @@ void physical_memory_set_dirty_range(ram_addr_t start, ram_addr_t length,
     }
 }
 
+void physical_memory_set_dirty_range_nocode(ram_addr_t start,
+                                            ram_addr_t length)
+{
+    DirtyMemoryBlocks *blocks;
+    unsigned long page, idx, offset;
+
+    if (xen_enabled() || !length ||
+        length > TARGET_PAGE_SIZE - (start & (TARGET_PAGE_SIZE - 1))) {
+        physical_memory_set_dirty_range(start, length,
+                                        DIRTY_CLIENTS_NOCODE);
+        return;
+    }
+
+    page = start >> TARGET_PAGE_BITS;
+    idx = page / DIRTY_MEMORY_BLOCK_SIZE;
+    offset = page % DIRTY_MEMORY_BLOCK_SIZE;
+
+    WITH_RCU_READ_LOCK_GUARD() {
+        blocks = qatomic_rcu_read(
+            &ram_list.dirty_memory[DIRTY_MEMORY_VGA]);
+        set_bit_atomic(offset, blocks->blocks[idx]);
+        blocks = qatomic_rcu_read(
+            &ram_list.dirty_memory[DIRTY_MEMORY_MIGRATION]);
+        set_bit_atomic(offset, blocks->blocks[idx]);
+        blocks = qatomic_rcu_read(
+            &ram_list.dirty_memory[DIRTY_MEMORY_NV2A]);
+        set_bit_atomic(offset, blocks->blocks[idx]);
+        blocks = qatomic_rcu_read(
+            &ram_list.dirty_memory[DIRTY_MEMORY_NV2A_TEX]);
+        set_bit_atomic(offset, blocks->blocks[idx]);
+    }
+}
+
 /* Note: start and end must be within the same ram block.  */
 bool physical_memory_test_and_clear_dirty(ram_addr_t start,
                                               ram_addr_t length,

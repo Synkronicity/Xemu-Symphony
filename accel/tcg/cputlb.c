@@ -1356,10 +1356,14 @@ static void notdirty_write(CPUState *cpu, vaddr mem_vaddr, unsigned size,
      * Set both VGA and migration bits for simplicity and to remove
      * the notdirty callback faster.
      */
-    physical_memory_set_dirty_range(ram_addr, size, DIRTY_CLIENTS_NOCODE);
+    physical_memory_set_dirty_range_nocode(ram_addr, size);
 
-    /* We remove the notdirty callback only if the code has been flushed. */
-    if (!physical_memory_is_clean(ram_addr)) {
+    /*
+     * The other clients were just dirtied, so only code can be clean.
+     * A concurrent client clear rearms the TLB through
+     * physical_memory_dirty_bits_cleared().
+     */
+    if (physical_memory_get_dirty_flag(ram_addr, DIRTY_MEMORY_CODE)) {
         trace_memory_notdirty_set_dirty(mem_vaddr);
         tlb_set_dirty(cpu, mem_vaddr);
     }
