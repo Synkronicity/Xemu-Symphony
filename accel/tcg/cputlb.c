@@ -1106,9 +1106,11 @@ void tlb_set_page_full(CPUState *cpu, int mmu_idx,
     wp_flags = cpu_watchpoint_address_matches(cpu, addr_page,
                                               TARGET_PAGE_SIZE);
 #ifdef XBOX
+    full->mem_access_callback = NULL;
     wp_flags |= mem_access_callback_address_matches(cpu,
                                                     iotlb & TARGET_PAGE_MASK,
-                                                    TARGET_PAGE_SIZE);
+                                                    TARGET_PAGE_SIZE,
+                                                    &full->mem_access_callback);
 #endif
 
     index = tlb_index(cpu, mmu_idx, addr_page);

@@ -853,14 +853,23 @@ static inline bool access_callback_address_matches(MemAccessCallback *cb,
     return !(addr > watch_end || cb->addr > access_end);
 }
 
-int mem_access_callback_address_matches(CPUState *cpu, hwaddr addr, hwaddr len)
+int mem_access_callback_address_matches(CPUState *cpu, hwaddr addr, hwaddr len,
+                                        MemAccessCallback **unique)
 {
+    bool multiple = false;
     int ret = 0;
 
+    *unique = NULL;
     MemAccessCallback *cb;
     QTAILQ_FOREACH(cb, &cpu->mem_access_callbacks, entry) {
         if (access_callback_address_matches(cb, addr, len)) {
             ret |= BP_MEM_READ | BP_MEM_WRITE;
+            if (*unique != NULL) {
+                *unique = NULL;
+                multiple = true;
+            } else if (!multiple) {
+                *unique = cb;
+            }
         }
     }
 
@@ -902,6 +911,7 @@ static void do_mem_access_callback_remove_by_ref(CPUState *cpu,
 {
     MemAccessCallback *cb = (MemAccessCallback *)data.host_ptr;
     QTAILQ_REMOVE(&cpu->mem_access_callbacks, cb, entry);
+    tlb_flush(cpu);
     g_free(cb);
 }
 
@@ -922,8 +932,22 @@ void mem_check_access_callback_vaddr(CPUState *cpu,
                                      vaddr addr, vaddr len, int flags,
                                      void *tlbentryfull)
 {
-    ram_addr_t ram_addr = (((CPUTLBEntryFull *)tlbentryfull)->xlat_section
-                           & TARGET_PAGE_MASK) + addr;
+    CPUTLBEntryFull *full = (CPUTLBEntryFull *)tlbentryfull;
+    ram_addr_t ram_addr =
+        (full->xlat_section & TARGET_PAGE_MASK) + addr;
+    MemAccessCallback *cb = full->mem_access_callback;
+
+    if (cb != NULL) {
+        if (access_callback_address_matches(cb, ram_addr, len)) {
+            ram_addr_t ram_addr_base = memory_region_get_ram_addr(cb->mr);
+            assert(ram_addr_base != RAM_ADDR_INVALID);
+            ram_addr_t hit_addr = MAX(ram_addr, cb->addr);
+            hwaddr mr_offset = hit_addr - ram_addr_base;
+            bool is_write = (flags & BP_MEM_WRITE) != 0;
+            cb->func(cb->opaque, cb->mr, mr_offset, len, is_write);
+        }
+        return;
+    }
     mem_check_access_callback_ramaddr(cpu, ram_addr, len, flags);
 }
 
