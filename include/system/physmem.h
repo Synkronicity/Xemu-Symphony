@@ -15,6 +15,10 @@
 #define DIRTY_CLIENTS_NOCODE  (DIRTY_CLIENTS_ALL & ~(1 << DIRTY_MEMORY_CODE))
 
 bool physical_memory_get_dirty_flag(ram_addr_t addr, unsigned client);
+/* The returned bitmap word remains stable when DirtyMemoryBlocks grows. */
+void physical_memory_get_dirty_word(ram_addr_t addr, unsigned client,
+                                    unsigned long **word,
+                                    unsigned long *mask);
 
 bool physical_memory_is_clean(ram_addr_t addr);
 

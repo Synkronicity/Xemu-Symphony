@@ -225,6 +225,8 @@ struct CPUTLBEntryFull {
     hwaddr xlat_section;
 #ifdef XBOX
     struct MemAccessCallback *mem_access_callback;
+    unsigned long *code_dirty_word;
+    unsigned long code_dirty_mask;
 #endif
 
     /*

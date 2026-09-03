@@ -1055,6 +1055,26 @@ bool physical_memory_get_dirty_flag(ram_addr_t addr, unsigned client)
     return dirty;
 }
 
+void physical_memory_get_dirty_word(ram_addr_t addr, unsigned client,
+                                    unsigned long **word,
+                                    unsigned long *mask)
+{
+    DirtyMemoryBlocks *blocks;
+    unsigned long page, idx, offset;
+
+    assert(client < DIRTY_MEMORY_NUM);
+
+    page = addr >> TARGET_PAGE_BITS;
+    idx = page / DIRTY_MEMORY_BLOCK_SIZE;
+    offset = page % DIRTY_MEMORY_BLOCK_SIZE;
+
+    WITH_RCU_READ_LOCK_GUARD() {
+        blocks = qatomic_rcu_read(&ram_list.dirty_memory[client]);
+        *word = blocks->blocks[idx] + BIT_WORD(offset);
+        *mask = BIT_MASK(offset);
+    }
+}
+
 bool physical_memory_is_clean(ram_addr_t addr)
 {
     unsigned long page = addr >> TARGET_PAGE_BITS;

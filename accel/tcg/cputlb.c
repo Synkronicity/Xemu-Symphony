@@ -1038,6 +1038,11 @@ void tlb_set_page_full(CPUState *cpu, int mmu_idx,
 
     assert_cpu_is_self(cpu);
 
+#ifdef XBOX
+    full->code_dirty_word = NULL;
+    full->code_dirty_mask = 0;
+#endif
+
     if (full->lg_page_size <= TARGET_PAGE_BITS) {
         sz = TARGET_PAGE_SIZE;
     } else {
@@ -1085,8 +1090,15 @@ void tlb_set_page_full(CPUState *cpu, int mmu_idx,
         if (prot & PAGE_WRITE) {
             if (section->readonly) {
                 write_flags |= TLB_DISCARD_WRITE;
-            } else if (physical_memory_is_clean(iotlb)) {
-                write_flags |= TLB_NOTDIRTY;
+            } else {
+#ifdef XBOX
+                physical_memory_get_dirty_word(iotlb, DIRTY_MEMORY_CODE,
+                                               &full->code_dirty_word,
+                                               &full->code_dirty_mask);
+#endif
+                if (physical_memory_is_clean(iotlb)) {
+                    write_flags |= TLB_NOTDIRTY;
+                }
             }
         }
     } else {
@@ -1345,10 +1357,13 @@ static void notdirty_write(CPUState *cpu, vaddr mem_vaddr, unsigned size,
                            CPUTLBEntryFull *full, uintptr_t retaddr)
 {
     ram_addr_t ram_addr = mem_vaddr + full->xlat_section;
+    bool code_dirty;
 
     trace_memory_notdirty_write_access(mem_vaddr, ram_addr, size);
 
-    if (!physical_memory_get_dirty_flag(ram_addr, DIRTY_MEMORY_CODE)) {
+    assert(full->code_dirty_word != NULL);
+    code_dirty = qatomic_read(full->code_dirty_word) & full->code_dirty_mask;
+    if (!code_dirty) {
         tb_invalidate_phys_range_fast(cpu, ram_addr, size, retaddr);
     }
 
@@ -1363,7 +1378,8 @@ static void notdirty_write(CPUState *cpu, vaddr mem_vaddr, unsigned size,
      * A concurrent client clear rearms the TLB through
      * physical_memory_dirty_bits_cleared().
      */
-    if (physical_memory_get_dirty_flag(ram_addr, DIRTY_MEMORY_CODE)) {
+    code_dirty = qatomic_read(full->code_dirty_word) & full->code_dirty_mask;
+    if (code_dirty) {
         trace_memory_notdirty_set_dirty(mem_vaddr);
         tlb_set_dirty(cpu, mem_vaddr);
     }
