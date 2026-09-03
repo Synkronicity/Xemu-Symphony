@@ -1480,6 +1480,7 @@ static void begin_draw(PGRAPHState *pg)
                 clamp_line_width_to_device_limits(pg, pg->surface_scale_factor);
             vkCmdSetLineWidth(r->command_buffer, line_width);
         }
+        r->pipeline_binding_changed = false;
     }
 
     if (!pg->clearing) {
