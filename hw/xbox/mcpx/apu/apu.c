@@ -388,9 +388,28 @@ static void mcpx_apu_vm_state_change(void *opaque, bool running, RunState state)
 static int mcpx_apu_pre_load(void *opaque)
 {
     MCPXAPUState *d = opaque;
+
+    /*
+     * VMState callbacks run under the BQL.  The APU frame thread can release
+     * d->lock and wait for the BQL while publishing an IRQ, so waiting for it
+     * to become idle while retaining the BQL deadlocks that lock inversion.
+     * Follow the established reset/state-change ordering: release the BQL
+     * before taking the APU lock, then restore it before returning to VMState.
+     */
+    bql_unlock();
     qemu_mutex_lock(&d->lock);
+    /*
+     * VMState loads the DSP core arrays after this callback returns.  Do not
+     * rely on a preceding VM run-state notification to have stopped the APU:
+     * snapshot loading can otherwise race the frame thread as it executes
+     * partially restored program RAM.  Leave pause_requested set; the normal
+     * running-state callback synchronizes the restored state to the active DSP
+     * backend before resuming the thread.
+     */
+    mcpx_apu_wait_for_idle(d);
     mcpx_apu_reset_locked(d);
     qemu_mutex_unlock(&d->lock);
+    bql_lock();
     return 0;
 }
 
