@@ -646,6 +646,42 @@ static bool pgraph_method_array_bulk(NV2AState *d, PGRAPHState *pg,
                                      uint32_t *parameters,
                                      size_t num_words_available);
 
+static bool pgraph_method_array_packet_fits(PGRAPHState *pg,
+                                            unsigned int method,
+                                            size_t packet_words)
+{
+    size_t current_length;
+    size_t pending_values = 0;
+    size_t values_per_word = method == NV097_ARRAY_ELEMENT16 ? 2 : 1;
+
+    if (method == NV097_INLINE_ARRAY) {
+        current_length = pg->inline_array_length;
+    } else {
+        current_length = pg->inline_elements_length;
+        if (pg->draw_arrays_length) {
+            /* pgraph_expand_draw_arrays() flushes earlier entries first. */
+            if (pg->draw_arrays_length > 1) {
+                current_length = 0;
+            }
+            pending_values =
+                pg->draw_arrays_count[pg->draw_arrays_length - 1];
+        }
+    }
+
+    return pgraph_inline_packet_plan_length(
+        current_length, pending_values, packet_words, values_per_word,
+        NV2A_MAX_BATCH_LENGTH, NULL);
+}
+
+static void pgraph_drop_oversized_array_packet(unsigned int method,
+                                                size_t packet_words)
+{
+    qemu_log_mask(LOG_GUEST_ERROR,
+                  "NV2A PGRAPH: dropping oversized method 0x%04x "
+                  "packet (%zu words)\n",
+                  method, packet_words);
+}
+
 static void pgraph_method_non_inc(MethodFunc handler, METHOD_HANDLER_ARG_DECL)
 {
     bool array_packet = method == NV097_ARRAY_ELEMENT16 ||
@@ -653,6 +689,19 @@ static void pgraph_method_non_inc(MethodFunc handler, METHOD_HANDLER_ARG_DECL)
                         method == NV097_INLINE_ARRAY;
 
     if (array_packet) {
+        size_t packet_words = inc ? 1 : num_words_available;
+        if (!pgraph_method_array_packet_fits(pg, method, packet_words)) {
+            pgraph_drop_oversized_array_packet(method, packet_words);
+            if (!inc && pgraph_method_trace_enabled()) {
+                for (size_t i = 1; i < packet_words; i++) {
+                    pgraph_method_log(subchannel, NV_KELVIN_PRIMITIVE,
+                                      method, ldl_le_p(parameters + i));
+                }
+            }
+            *num_words_consumed = packet_words;
+            return;
+        }
+
         PGRAPHInlinePacketMode mode = pgraph_inline_packet_mode(
             inc, pgraph_method_trace_enabled());
 

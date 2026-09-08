@@ -30,17 +30,38 @@ static inline PGRAPHInlinePacketMode pgraph_inline_packet_mode(
     return PGRAPH_INLINE_PACKET_BULK;
 }
 
+static inline bool pgraph_inline_packet_plan_length(size_t current_length,
+                                                    size_t pending_values,
+                                                    size_t packet_words,
+                                                    size_t values_per_word,
+                                                    size_t capacity,
+                                                    size_t *output_length)
+{
+    if (!values_per_word || current_length > capacity ||
+        pending_values > capacity - current_length) {
+        return false;
+    }
+
+    size_t length_after_pending = current_length + pending_values;
+    if (packet_words >
+        (capacity - length_after_pending) / values_per_word) {
+        return false;
+    }
+
+    if (output_length) {
+        *output_length =
+            length_after_pending + packet_words * values_per_word;
+    }
+    return true;
+}
+
 static inline bool pgraph_inline_packet_fits(size_t current_length,
                                              size_t packet_words,
                                              size_t values_per_word,
                                              size_t capacity)
 {
-    if (!values_per_word || current_length > capacity) {
-        return false;
-    }
-
-    return packet_words <=
-           (capacity - current_length) / values_per_word;
+    return pgraph_inline_packet_plan_length(current_length, 0, packet_words,
+                                             values_per_word, capacity, NULL);
 }
 
 static inline void pgraph_inline_element16_store(uint32_t *destination,

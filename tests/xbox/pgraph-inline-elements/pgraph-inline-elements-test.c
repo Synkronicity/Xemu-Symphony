@@ -33,6 +33,30 @@ static void test_capacity(void)
     assert(!pgraph_inline_packet_fits(7, SIZE_MAX, 2, 8));
 }
 
+static void test_packet_plan_length(void)
+{
+    size_t output_length = 99;
+
+    assert(pgraph_inline_packet_plan_length(2, 2, 2, 2, 8,
+                                            &output_length));
+    assert(output_length == 8);
+
+    output_length = 99;
+    assert(!pgraph_inline_packet_plan_length(2, 2, 3, 2, 8,
+                                             &output_length));
+    assert(output_length == 99);
+
+    output_length = 99;
+    assert(!pgraph_inline_packet_plan_length(7, 2, 0, 1, 8,
+                                             &output_length));
+    assert(output_length == 99);
+
+    output_length = 99;
+    assert(!pgraph_inline_packet_plan_length(0, 0, SIZE_MAX, 2, SIZE_MAX,
+                                             &output_length));
+    assert(output_length == 99);
+}
+
 static void test_element16_order(void)
 {
     uint32_t output[2] = { UINT32_MAX, UINT32_MAX };
@@ -46,6 +70,7 @@ int main(void)
 {
     test_packet_modes();
     test_capacity();
+    test_packet_plan_length();
     test_element16_order();
     return 0;
 }
