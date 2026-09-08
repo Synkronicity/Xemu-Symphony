@@ -49,6 +49,7 @@ tests = {
   'test-interval-tree': [],
   'test-fifo': [],
   'test-lru-active': [],
+  'test-lru-full': [],
 }
 
 if have_system or have_tools

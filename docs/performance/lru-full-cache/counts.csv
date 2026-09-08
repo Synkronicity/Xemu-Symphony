@@ -1,0 +1,8 @@
+metric,parent,repair,unit
+cache_entries,4096,4096,entries
+cache_misses,1024,1024,misses
+unsuccessful_free_visits,4194304,0,visits
+eviction_visits,1024,1024,visits
+pre_eviction_callbacks,1024,1024,calls
+post_eviction_callbacks,1024,1024,calls
+replacement_initializations,1024,1024,calls

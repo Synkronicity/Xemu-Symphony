@@ -147,6 +147,10 @@ LruNode *lru_get_one_free(Lru *lru)
 {
 	LruNode *found;
 
+	if (lru->num_free == 0) {
+		return lru_evict_one(lru);
+	}
+
 	QTAILQ_FOREACH_REVERSE(found, &lru->global, next_global) {
 		if (!lru_is_node_in_use(lru, found)) {
 			return found;
