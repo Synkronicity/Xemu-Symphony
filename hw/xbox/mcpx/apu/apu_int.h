@@ -84,6 +84,7 @@ typedef struct MCPXAPUState {
     QemuCond idle_cond;
     bool pause_requested;
     bool is_idle;
+    bool is_5_1_active;
 
     MemoryRegion *ram;
     uint8_t *ram_ptr;
@@ -92,8 +93,6 @@ typedef struct MCPXAPUState {
     MCPXAPUVPState vp;
     MCPXAPUGPState gp;
     MCPXAPUEPState ep;
-
-    bool is_5_1_active;
 
     uint32_t regs[0x20000];
 
@@ -120,6 +119,7 @@ typedef struct MCPXAPUState {
     struct {
         McpxApuDebugMonitorPoint point;
         int16_t frame_buf[256][2]; // 1 EP frame (0x400 bytes)
+        int16_t surround_buf[256][6]; // 1 EP 5.1 frame (0xC00 bytes)
         SDL_AudioStream *stream;
         int queued_bytes_low, queued_bytes_high;
     } monitor;

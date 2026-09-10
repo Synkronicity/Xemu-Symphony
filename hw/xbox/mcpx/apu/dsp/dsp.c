@@ -3,7 +3,6 @@
  *
  * Copyright (c) 2015 espes
  * Copyright (c) 2020-2025 Matt Borgerson
- * Copyright (c) 2026 Will Bonnett
  *
  * Adapted from Hatari DSP M56001 emulation
  * (C) 2001-2008 ARAnyM developer team
@@ -25,6 +24,9 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/bswap.h"
+#include "dsp_dma.h"
+#include "dsp.h"
 #include "dsp_internal.h"
 #include "trace.h"
 #include "ui/xemu-settings.h"
@@ -42,90 +44,30 @@ static int g_gp_frame_count = 0;
  * Shared peripheral I/O helpers, used by both backends via callbacks.
  */
 
-static uint32_t dsp_dma_read_word(DSPState *dsp, uint32_t addr)
-{
-    if (addr >= 0x004000 && (addr - 0x004000) < 16384) {
-        return dsp->ep_dma.ext_mem[addr - 0x004000];
-    }
-    if (addr < DSP_XRAM_SIZE) {
-        return dsp_read_memory_x(dsp, addr);
-    }
-    return 0;
-}
-
-static void dsp_dma_write_word(DSPState *dsp, uint32_t addr, uint32_t val)
-{
-    if (addr >= 0x004000 && (addr - 0x004000) < 16384) {
-        dsp->ep_dma.ext_mem[addr - 0x004000] = val;
-        return;
-    }
-    if (addr < DSP_XRAM_SIZE) {
-        dsp_write_memory_x(dsp, addr, val);
-    }
-}
-
-static void ep_dma_transfer(DSPState *dsp)
-{
-    for (uint32_t i = 0; i < 64; i++) {
-        uint32_t val = dsp_dma_read_word(dsp, dsp->ep_dma.dsr0 + i);
-        dsp_dma_write_word(dsp, dsp->ep_dma.ddr0 + i, val);
-    }
-}
-
 uint32_t read_peripheral(DSPState *dsp, uint32_t address)
 {
     uint32_t v = 0xababa;
     switch (address) {
     case 0xFFFFB3:
-        if (!dsp->is_gp) {
-            v = 0x00000C;
-        } else {
-            v = 0; // core->num_inst; // ??
-        }
+        v = 0; // core->num_inst; // ??
         break;
     case 0xFFFFC5:
-        if (!dsp->is_gp) {
-            v = dsp->ep_dma.c5_reg;
-        } else {
-            v = dsp->interrupts;
-            if (dsp->dma.eol) {
-                v |= INTERRUPT_DMA_EOL;
-            }
+        v = dsp->interrupts;
+        if (dsp->dma.eol) {
+            v |= INTERRUPT_DMA_EOL;
         }
         break;
     case 0xFFFFD4:
-        if (!dsp->is_gp) {
-            v = dsp->ep_dma.dsr0;
-        } else {
-            v = dsp_dma_read(&dsp->dma, DMA_NEXT_BLOCK);
-        }
+        v = dsp_dma_read(&dsp->dma, DMA_NEXT_BLOCK);
         break;
     case 0xFFFFD5:
-        if (!dsp->is_gp) {
-            v = dsp->ep_dma.ddr0;
-        } else {
-            v = dsp_dma_read(&dsp->dma, DMA_START_BLOCK);
-        }
+        v = dsp_dma_read(&dsp->dma, DMA_START_BLOCK);
         break;
     case 0xFFFFD6:
-        if (!dsp->is_gp) {
-            if (dsp->ep_dma.countdown > 0) {
-                dsp->ep_dma.countdown--;
-            }
-            v = (dsp->ep_dma.dcr0 & ~0x000010) | ((dsp->ep_dma.countdown == 0) ? 0x10 : 0x00);
-            if (dsp->ep_dma.countdown == 0) {
-                dsp->ep_dma.countdown = -1;
-            }
-        } else {
-            v = dsp_dma_read(&dsp->dma, DMA_CONTROL);
-        }
+        v = dsp_dma_read(&dsp->dma, DMA_CONTROL);
         break;
     case 0xFFFFD7:
-        if (!dsp->is_gp) {
-            v = 0;
-        } else {
-            v = dsp_dma_read(&dsp->dma, DMA_CONFIGURATION);
-        }
+        v = dsp_dma_read(&dsp->dma, DMA_CONFIGURATION);
         break;
     }
 
@@ -142,49 +84,22 @@ void write_peripheral(DSPState *dsp, uint32_t address, uint32_t value)
         }
         break;
     case 0xFFFFC5:
-        if (!dsp->is_gp) {
-            if (value & 0x02) {
-                dsp->ep_dma.c5_reg &= ~0x02;
-            }
-            if (value & 0x80) {
-                dsp->ep_dma.c5_reg |= 0x80;
-            }
-        } else {
-            dsp->interrupts &= ~value;
-            if (value & INTERRUPT_DMA_EOL) {
-                dsp->dma.eol = false;
-            }
+        dsp->interrupts &= ~value;
+        if (value & INTERRUPT_DMA_EOL) {
+            dsp->dma.eol = false;
         }
         break;
     case 0xFFFFD4:
-        if (!dsp->is_gp) {
-            dsp->ep_dma.dsr0 = value & 0xFFFFFF;
-        } else {
-            dsp_dma_write(&dsp->dma, DMA_NEXT_BLOCK, value);
-        }
+        dsp_dma_write(&dsp->dma, DMA_NEXT_BLOCK, value);
         break;
     case 0xFFFFD5:
-        if (!dsp->is_gp) {
-            dsp->ep_dma.ddr0 = value & 0xFFFFFF;
-        } else {
-            dsp_dma_write(&dsp->dma, DMA_START_BLOCK, value);
-        }
+        dsp_dma_write(&dsp->dma, DMA_START_BLOCK, value);
         break;
     case 0xFFFFD6:
-        if (!dsp->is_gp) {
-            dsp->ep_dma.dcr0 = value & 0xFFFFFF;
-            if (value & 0x01) {
-                ep_dma_transfer(dsp);
-                dsp->ep_dma.countdown = 2;
-            }
-        } else {
-            dsp_dma_write(&dsp->dma, DMA_CONTROL, value);
-        }
+        dsp_dma_write(&dsp->dma, DMA_CONTROL, value);
         break;
     case 0xFFFFD7:
-        if (dsp->is_gp) {
-            dsp_dma_write(&dsp->dma, DMA_CONFIGURATION, value);
-        }
+        dsp_dma_write(&dsp->dma, DMA_CONFIGURATION, value);
         break;
     }
 
@@ -207,7 +122,7 @@ DSPState *dsp_init(void *rw_opaque, dsp_scratch_rw_func scratch_rw,
     dsp->dma.scratch_rw = scratch_rw;
     dsp->dma.fifo_rw = fifo_rw;
 
-    if (is_gp && g_config.audio.use_dsp_jit) {
+    if (g_config.audio.use_dsp_jit) {
         dsp_jit_init(dsp);
     } else {
         dsp_c_init(dsp);
@@ -226,8 +141,6 @@ void dsp_destroy(DSPState *dsp)
 
 void dsp_reset(DSPState *dsp)
 {
-    dsp->ep_dma.countdown = -1;
-    dsp->ep_dma.c5_reg = 0;
     dsp->ops->reset(dsp);
 }
 
@@ -236,27 +149,107 @@ void dsp_step(DSPState *dsp)
     dsp->ops->step(dsp);
 }
 
-uint32_t dsp_get_pc(DSPState *dsp)
-{
-    return dsp->ops->get_pc(dsp);
-}
-
 void dsp_run(DSPState *dsp, int cycles)
 {
     dsp->ops->run(dsp, cycles);
 }
 
+bool dsp_bootstrap_ep_firmware(DSPState *dsp)
+{
+    const char *candidates[] = {
+        "./dolby_ep.bin",
+        "./tools/dolby_ep.bin",
+        "../tools/dolby_ep.bin",
+        NULL
+    };
+
+    FILE *f = NULL;
+    const char *found_path = NULL;
+    for (int i = 0; candidates[i] != NULL; i++) {
+        f = fopen(candidates[i], "rb");
+        if (f) {
+            found_path = candidates[i];
+            break;
+        }
+    }
+
+    if (!f) {
+        static bool warned = false;
+        if (!warned) {
+            fprintf(stderr, "[APU EP] Notice: dolby_ep.bin not found, running without EP firmware\n");
+            warned = true;
+        }
+        return false;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (file_size <= 0) {
+        fprintf(stderr, "[APU EP] Warning: %s is empty\n", found_path);
+        fclose(f);
+        return false;
+    }
+
+    size_t total_words = file_size / 4;
+    if (total_words < (0xC8 + 0x17F)) {
+        fprintf(stderr, "[APU EP] Warning: %s is too small (%zu words, expected >= %d)\n",
+                found_path, total_words, 0xC8 + 0x17F);
+        fclose(f);
+        return false;
+    }
+
+    uint32_t *buf = g_malloc(total_words * sizeof(uint32_t));
+    if (fread(buf, sizeof(uint32_t), total_words, f) != total_words) {
+        fprintf(stderr, "[APU EP] Warning: Failed reading %s\n", found_path);
+        g_free(buf);
+        fclose(f);
+        return false;
+    }
+    fclose(f);
+
+    size_t idx = 0;
+
+    /* Segment 1: 0x0000 (0xC8 words) */
+    for (size_t i = 0; i < 0xC8 && idx < total_words; i++, idx++) {
+        uint32_t word = le32_to_cpu(buf[idx]);
+        dsp_write_memory(dsp, 'P', 0x0000 + i, word & 0x00FFFFFF);
+    }
+
+    /* Segment 2: 0x0180 (0x17F words) */
+    for (size_t i = 0; i < 0x17F && idx < total_words; i++, idx++) {
+        uint32_t word = le32_to_cpu(buf[idx]);
+        dsp_write_memory(dsp, 'P', 0x0180 + i, word & 0x00FFFFFF);
+    }
+
+    /* Segment 3: 0x0300 (remainder) */
+    for (size_t i = 0; idx < total_words; i++, idx++) {
+        uint32_t word = le32_to_cpu(buf[idx]);
+        dsp_write_memory(dsp, 'P', 0x0300 + i, word & 0x00FFFFFF);
+    }
+
+    dsp_invalidate_opcache(dsp);
+    g_free(buf);
+
+    fprintf(stderr, "[APU EP] Loaded %zu firmware words from %s into EP P-RAM\n",
+            total_words, found_path);
+    return true;
+}
+
 void dsp_bootstrap(DSPState *dsp)
 {
-    dsp->ops->bootstrap(dsp);
+    if (!dsp->is_gp) {
+        dsp_bootstrap_ep_firmware(dsp);
+    } else {
+        dsp->ops->bootstrap(dsp);
+    }
 }
 
 void dsp_start_frame(DSPState *dsp)
 {
     if (dsp->is_gp) {
         g_gp_frame_count++;
-    } else {
-        dsp->ep_dma.c5_reg |= 0x02;
     }
     dsp->ops->start_frame(dsp);
 }
@@ -292,6 +285,11 @@ void dsp_set_cycle_count(DSPState *dsp, uint32_t count)
     dsp->ops->set_cycle_count(dsp, count);
 }
 
+uint32_t dsp_get_pc(DSPState *dsp)
+{
+    return dsp->ops->get_pc ? dsp->ops->get_pc(dsp) : 0;
+}
+
 void dsp_invalidate_opcache(DSPState *dsp)
 {
     dsp->ops->invalidate_opcache(dsp);
@@ -309,9 +307,6 @@ void dsp_sync_from_vm(DSPState *dsp)
 
 void dsp_set_engine(DSPState *dsp, bool use_jit)
 {
-    if (!dsp->is_gp) {
-        use_jit = false;
-    }
     bool currently_jit = (dsp->ops == &jit_dsp_ops);
     if (use_jit == currently_jit) {
         return;

@@ -3,7 +3,6 @@
  *
  * Copyright (c) 2015 espes
  * Copyright (c) 2020-2025 Matt Borgerson
- * Copyright (c) 2026 Will Bonnett
  *
  * Adapted from Hatari DSP M56001 emulation
  * (C) 2001-2008 ARAnyM developer team
@@ -64,9 +63,7 @@ static void dsp_c_reset(DSPState *dsp)
 
 static void dsp_c_step(DSPState *dsp)
 {
-    dsp_core_t *core = c_core(dsp);
-    dsp56k_execute_instruction(core);
-    core->cycle_count += core->instr_cycle;
+    dsp56k_execute_instruction(c_core(dsp));
 }
 
 static void dsp_c_run(DSPState *dsp, int cycles)
@@ -89,67 +86,6 @@ static void dsp_c_run(DSPState *dsp, int cycles)
     }
 }
 
-static void dsp_c_bootstrap_ep_firmware(dsp_core_t *core)
-{
-    const char *candidates[] = {
-        "dolby_ep.bin",
-        "tools/dolby_ep.bin",
-        "../tools/dolby_ep.bin",
-        "tools/halo2_dolby.bin",
-        NULL
-    };
-
-    FILE *f = NULL;
-    const char *found_path = NULL;
-    for (int i = 0; candidates[i] != NULL; i++) {
-        f = fopen(candidates[i], "rb");
-        if (f) {
-            found_path = candidates[i];
-            break;
-        }
-    }
-
-    if (!f) {
-        fprintf(stderr, "[EP NOTICE] Discrete 5.1 Dolby microcode (dolby_ep.bin) not found.\n"
-                        "[EP NOTICE] Encoding Processor will remain idle; audio running in standard fallback mode.\n");
-        return;
-    }
-
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    uint32_t total_words = size / 4;
-    uint32_t *buf = g_malloc(size);
-    if (fread(buf, 4, total_words, f) != total_words) {
-        fprintf(stderr, "[EP ERROR] Failed to read microcode payload from %s\n", found_path);
-        g_free(buf);
-        fclose(f);
-        return;
-    }
-    fclose(f);
-
-    /* Segmented Dolby Scatter-Loader */
-    uint32_t seg1_len = 0xC8;
-    uint32_t seg2_len = 0x17F;
-    uint32_t seg3_len = (total_words > (seg1_len + seg2_len)) ? (total_words - seg1_len - seg2_len) : 0;
-
-    for (uint32_t i = 0; i < seg1_len && i < total_words; i++) {
-        core->pram[0x0000 + i] = buf[i] & 0x00FFFFFF;
-    }
-    for (uint32_t i = 0; i < seg2_len && (seg1_len + i) < total_words; i++) {
-        core->pram[0x0180 + i] = buf[seg1_len + i] & 0x00FFFFFF;
-    }
-    for (uint32_t i = 0; i < seg3_len && (seg1_len + seg2_len + i) < total_words; i++) {
-        if ((0x0300 + i) >= DSP_PRAM_SIZE) break;
-        core->pram[0x0300 + i] = buf[seg1_len + seg2_len + i] & 0x00FFFFFF;
-    }
-
-    g_free(buf);
-    fprintf(stderr, "[EP BOOTSTRAP] Loaded %u words from %s | Reset Vector P:0 = 0x%06X\n",
-            total_words, found_path, core->pram[0]);
-}
-
 static void dsp_c_bootstrap(DSPState *dsp)
 {
     dsp_core_t *core = c_core(dsp);
@@ -164,9 +100,6 @@ static void dsp_c_bootstrap(DSPState *dsp)
                 core->pram[i] &= 0x00ffffff;
             }
         }
-    } else {
-        /* Bootstrap Encoding Processor with genuine Dolby firmware */
-        dsp_c_bootstrap_ep_firmware(core);
     }
     memset(core->pram_opcache, 0, sizeof(core->pram_opcache));
 }
@@ -218,13 +151,12 @@ static void dsp_c_write_memory(DSPState *dsp, char space, uint32_t address,
 
 static bool dsp_c_get_halt_requested(DSPState *dsp)
 {
-    return c_core(dsp)->is_idle || c_core(dsp)->halt_requested;
+    return c_core(dsp)->is_idle;
 }
 
 static void dsp_c_set_halt_requested(DSPState *dsp, bool halt)
 {
     c_core(dsp)->is_idle = halt;
-    c_core(dsp)->halt_requested = halt;
 }
 
 static uint32_t dsp_c_get_cycle_count(DSPState *dsp)
@@ -237,14 +169,14 @@ static void dsp_c_set_cycle_count(DSPState *dsp, uint32_t count)
     c_core(dsp)->cycle_count = count;
 }
 
-static void dsp_c_invalidate_opcache(DSPState *dsp)
-{
-    memset(c_core(dsp)->pram_opcache, 0, sizeof(c_core(dsp)->pram_opcache));
-}
-
 static uint32_t dsp_c_get_pc(DSPState *dsp)
 {
     return c_core(dsp)->pc;
+}
+
+static void dsp_c_invalidate_opcache(DSPState *dsp)
+{
+    memset(c_core(dsp)->pram_opcache, 0, sizeof(c_core(dsp)->pram_opcache));
 }
 
 /*
@@ -327,7 +259,6 @@ void dsp_c_init(DSPState *dsp)
 {
     dsp_core_t *core = g_new0(dsp_core_t, 1);
     core->opaque = dsp;
-    core->is_gp = dsp->is_gp;
     core->read_peripheral = c_read_peripheral;
     core->write_peripheral = c_write_peripheral;
 
@@ -344,11 +275,7 @@ void dsp_c_init(DSPState *dsp)
      * will be overwritten by the subsequent sync_from_vm. */
     dsp56k_reset_cpu(core);
 
-    if (dsp->is_gp) {
-        memset(core->pram, 0xCA, DSP_PRAM_SIZE * sizeof(uint32_t));
-    } else {
-        memset(core->pram, 0, DSP_PRAM_SIZE * sizeof(uint32_t));
-    }
+    memset(core->pram, 0xCA, DSP_PRAM_SIZE * sizeof(uint32_t));
     memset(core->xram, 0xCA, DSP_XRAM_SIZE * sizeof(uint32_t));
     memset(core->yram, 0xCA, DSP_YRAM_SIZE * sizeof(uint32_t));
     dsp->ops->invalidate_opcache(dsp);

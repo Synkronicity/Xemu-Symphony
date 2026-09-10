@@ -2,7 +2,6 @@
  * MCPX DSP emulator
  *
  * Copyright (c) 2015 espes
- * Copyright (c) 2026 Will Bonnett
  *
  * Adapted from Hatari DSP M56001 emulation
  * (C) 2001-2008 ARAnyM developer team
@@ -38,7 +37,6 @@ typedef struct DSPOps {
     void (*finalize)(DSPState *dsp);
     void (*reset)(DSPState *dsp);
     void (*step)(DSPState *dsp);
-    uint32_t (*get_pc)(DSPState *dsp);
     void (*run)(DSPState *dsp, int cycles);
     void (*bootstrap)(DSPState *dsp);
     void (*start_frame)(DSPState *dsp);
@@ -49,6 +47,7 @@ typedef struct DSPOps {
     void (*set_halt_requested)(DSPState *dsp, bool idle);
     uint32_t (*get_cycle_count)(DSPState *dsp);
     void (*set_cycle_count)(DSPState *dsp, uint32_t count);
+    uint32_t (*get_pc)(DSPState *dsp);
     void (*invalidate_opcache)(DSPState *dsp);
     void (*sync_to_vm)(DSPState *dsp);
     void (*sync_from_vm)(DSPState *dsp);
@@ -106,15 +105,6 @@ struct DSPState {
 
     bool is_gp;
 
-    struct {
-        uint32_t dsr0;
-        uint32_t ddr0;
-        uint32_t dcr0;
-        uint32_t c5_reg;
-        int countdown;
-        uint32_t ext_mem[16384];
-    } ep_dma;
-
     void *backend;
 };
 
@@ -124,31 +114,22 @@ void dsp_destroy(DSPState *dsp);
 void dsp_reset(DSPState *dsp);
 
 void dsp_step(DSPState *dsp);
-uint32_t dsp_get_pc(DSPState *dsp);
 void dsp_run(DSPState *dsp, int cycles);
 
 void dsp_bootstrap(DSPState *dsp);
+bool dsp_bootstrap_ep_firmware(DSPState *dsp);
 void dsp_start_frame(DSPState *dsp);
 
 uint32_t dsp_read_memory(DSPState *dsp, char space, uint32_t addr);
 void dsp_write_memory(DSPState *dsp, char space, uint32_t address,
                       uint32_t value);
 
-static inline uint32_t dsp_read_memory_x(DSPState *dsp, uint32_t addr)
-{
-    return dsp_read_memory(dsp, 'X', addr);
-}
-
-static inline void dsp_write_memory_x(DSPState *dsp, uint32_t addr, uint32_t val)
-{
-    dsp_write_memory(dsp, 'X', addr, val);
-}
-
 /* Accessor functions for backend-independent state access */
 bool dsp_get_halt_requested(DSPState *dsp);
 void dsp_set_halt_requested(DSPState *dsp, bool idle);
 uint32_t dsp_get_cycle_count(DSPState *dsp);
 void dsp_set_cycle_count(DSPState *dsp, uint32_t count);
+uint32_t dsp_get_pc(DSPState *dsp);
 void dsp_invalidate_opcache(DSPState *dsp);
 
 /* Backend synchronization - sync backend state to/from DspCoreState */

@@ -6792,25 +6792,6 @@ static void emu_do_reg(dsp_core_t* dsp)
     dsp->instr_cycle += 4;
 }
 
-static void emu_do_forever(dsp_core_t* dsp)
-{
-    /* Push current Loop Address (LA) and Loop Counter (LC) to loop stack */
-    dsp_stack_push(dsp, dsp->registers[DSP_REG_LA], dsp->registers[DSP_REG_LC], 0);
-
-    /* Fetch Word 2 (target loop end address) into LA */
-    dsp->registers[DSP_REG_LA] = read_memory_p(dsp, dsp->pc + 1) & BITMASK(16);
-    dsp->cur_inst_len++;
-
-    /* Push loop start address (PC + 2) and current Status Register (SR) */
-    dsp_stack_push(dsp, dsp->pc + dsp->cur_inst_len, dsp->registers[DSP_REG_SR], 0);
-
-    /* Assert Loop Flag (LF) and Forever Flag (FV) in SR */
-    dsp->registers[DSP_REG_SR] |= (1 << DSP_SR_LF) | (1 << DSP_SR_FV);
-
-    /* In DO FOREVER, LC is preserved and not modified */
-    dsp->instr_cycle += 4;
-}
-
 static void emu_dor_imm(dsp_core_t* dsp)
 {
     uint32_t xxxx = read_memory_p(dsp, dsp->pc+1);
@@ -6850,161 +6831,14 @@ static void emu_dor_reg(dsp_core_t* dsp)
     dsp->instr_cycle += 4;
 }
 
-static bool dsp_eval_cc(dsp_core_t *dsp, uint8_t cc)
-{
-    uint32_t sr = dsp->registers[DSP_REG_SR];
-    bool c = (sr >> 0) & 1; /* Carry */
-    bool v = (sr >> 1) & 1; /* Overflow */
-    bool z = (sr >> 2) & 1; /* Zero */
-    bool n = (sr >> 3) & 1; /* Negative */
-    bool u = (sr >> 4) & 1; /* Unnormalized */
-    bool e = (sr >> 5) & 1; /* Extension */
-    bool l = (sr >> 6) & 1; /* Limit */
-
-    switch (cc & 0x0F) {
-    case 0x0: return !c;                     /* CC: Carry Clear */
-    case 0x1: return (n ^ v) == 0;           /* GE: Greater or Equal */
-    case 0x2: return !z;                     /* NE: Not Equal */
-    case 0x3: return !n;                     /* PL: Plus */
-    case 0x4: return !u;                     /* NN: Not Normalized */
-    case 0x5: return !e;                     /* EC: Extension Clear */
-    case 0x6: return !l;                     /* LC: Limit Clear */
-    case 0x7: return (!z) && ((n ^ v) == 0); /* GT: Greater Than */
-    case 0x8: return c;                      /* CS: Carry Set */
-    case 0x9: return (n ^ v) != 0;           /* LT: Less Than */
-    case 0xA: return z;                      /* EQ: Equal */
-    case 0xB: return n;                      /* MI: Minus */
-    case 0xC: return u;                      /* NR: Normalized */
-    case 0xD: return e;                      /* ES: Extension Set */
-    case 0xE: return l;                      /* LS: Limit Set */
-    case 0xF: return z || ((n ^ v) != 0);    /* LE: Less or Equal */
-    default:  return false;
-    }
-}
-
-static void emu_brk_cc(dsp_core_t *dsp)
-{
-    uint8_t cc = (dsp->cur_inst >> 8) & 0x0F;
-
-    if (dsp_eval_cc(dsp, cc)) {
-        /* Only break if a hardware loop is actively running */
-        if (dsp->registers[DSP_REG_SR] & (1 << DSP_SR_LF)) {
-            uint32_t saved_pc, saved_sr;
-            uint32_t break_pc = dsp->registers[DSP_REG_LA] + 1;
-
-            /* Pop SSH/SSL loop return context */
-            dsp_stack_pop(dsp, &saved_pc, &saved_sr);
-
-            /* Restore LF and FV flags from stacked SR */
-            dsp->registers[DSP_REG_SR] &= 0x7f;
-            dsp->registers[DSP_REG_SR] |= saved_sr & ((1 << DSP_SR_LF) | (1 << DSP_SR_FV));
-
-            /* Restore previous loop bounds */
-            dsp_stack_pop(dsp, &dsp->registers[DSP_REG_LA], &dsp->registers[DSP_REG_LC]);
-
-            /* Jump immediately past the end of the loop */
-            dsp->pc = break_pc;
-            dsp->cur_inst_len = 0;
-            dsp->instr_cycle += 4;
-            return;
-        }
-    }
-
-    /* Condition not met or no active loop: advance normally */
-    dsp->instr_cycle += 2;
-}
-
 static void emu_enddo(dsp_core_t* dsp)
 {
     uint32_t saved_pc, saved_sr;
 
     dsp_stack_pop(dsp, &saved_pc, &saved_sr);
     dsp->registers[DSP_REG_SR] &= 0x7f;
-    dsp->registers[DSP_REG_SR] |= saved_sr & ((1<<DSP_SR_LF) | (1<<DSP_SR_FV));
+    dsp->registers[DSP_REG_SR] |= saved_sr & (1<<DSP_SR_LF);
     dsp_stack_pop(dsp, &dsp->registers[DSP_REG_LA], &dsp->registers[DSP_REG_LC]);
-}
-
-static void emu_extractu(dsp_core_t* dsp)
-{
-    uint32_t op = dsp->cur_inst;
-    int dest_reg = op & 1;        /* 0 = Accumulator A, 1 = Accumulator B */
-    int src_reg  = (op >> 4) & 1; /* 0 = Accumulator A, 1 = Accumulator B */
-
-    /* Read immediate control word #CO (Word 2) at dsp->pc + 1 */
-    uint32_t co = read_memory_p(dsp, dsp->pc + 1);
-    uint32_t width  = (co >> 12) & 0x3F;
-    uint32_t offset = co & 0x3F;
-
-    /* Detect single-word vs two-word encoding:
-     * In two-word EXTRACTU #CO, S2, D: #CO occupies Word 2 with bits 23..18 == 0
-     * and bits 11..6 == 0. If Word 2 is an instruction opcode (or width==0 && offset==0),
-     * fallback to single-word packed extraction where width is bits 15..10 and offset is bits 9..4.
-     */
-    if ((width == 0 && offset == 0 && (co & 0xFF0000) != 0) || (co & 0xFC0FC0) != 0) {
-        /* Single-word fallback */
-        width  = (op >> 10) & 0x3F;
-        offset = (op >> 4)  & 0x3F;
-        dest_reg = (op >> 3) & 1;
-        src_reg  = (op & 1) ? 0 : 1; /* In 0x0C1890, bit 0 is 0 for B */
-    } else {
-        /* Standard two-word EXTRACTU #CO, S2, D */
-        dsp->cur_inst_len++;
-    }
-
-    /* Retrieve 56-bit source accumulator value */
-    uint64_t s_val = 0;
-    if (src_reg != 0) {
-        /* Source is B */
-        s_val = ((uint64_t)(dsp->registers[DSP_REG_B2] & 0xFF) << 48) |
-                ((uint64_t)dsp->registers[DSP_REG_B1] << 24) |
-                (uint64_t)dsp->registers[DSP_REG_B0];
-    } else {
-        /* Source is A */
-        s_val = ((uint64_t)(dsp->registers[DSP_REG_A2] & 0xFF) << 48) |
-                ((uint64_t)dsp->registers[DSP_REG_A1] << 24) |
-                (uint64_t)dsp->registers[DSP_REG_A0];
-    }
-
-    /* Extract unsigned bit field */
-    uint64_t mask = (width >= 56) ? 0x00FFFFFFFFFFFFFFULL : ((1ULL << width) - 1ULL);
-    uint64_t result = (offset >= 56) ? 0 : ((s_val >> offset) & mask);
-
-    /* Store result into destination accumulator (right-aligned, zero-extended) */
-    if (dest_reg == 0) {
-        /* Dest is A */
-        dsp->registers[DSP_REG_A0] = result & 0xFFFFFF;
-        dsp->registers[DSP_REG_A1] = (result >> 24) & 0xFFFFFF;
-        dsp->registers[DSP_REG_A2] = (result >> 48) & 0xFF;
-    } else {
-        /* Dest is B */
-        dsp->registers[DSP_REG_B0] = result & 0xFFFFFF;
-        dsp->registers[DSP_REG_B1] = (result >> 24) & 0xFFFFFF;
-        dsp->registers[DSP_REG_B2] = (result >> 48) & 0xFF;
-    }
-
-    /* Update Status Register (SR) Condition Codes:
-     * V = 0, N = 0, Z = (result == 0), C = (offset > 0) ? bit(offset - 1) : 0
-     */
-    dsp->registers[DSP_REG_SR] &= ~(1 << DSP_SR_V); /* Overflow cleared */
-    dsp->registers[DSP_REG_SR] &= ~(1 << DSP_SR_N); /* Negative cleared (unsigned) */
-
-    if ((result & 0x00FFFFFFFFFFFFFFULL) == 0) {
-        dsp->registers[DSP_REG_SR] |= (1 << DSP_SR_Z);  /* Zero set */
-    } else {
-        dsp->registers[DSP_REG_SR] &= ~(1 << DSP_SR_Z); /* Zero cleared */
-    }
-
-    if (offset > 0 && offset <= 56) {
-        if ((s_val >> (offset - 1)) & 1) {
-            dsp->registers[DSP_REG_SR] |= (1 << DSP_SR_C);  /* Carry set from bit O-1 */
-        } else {
-            dsp->registers[DSP_REG_SR] &= ~(1 << DSP_SR_C); /* Carry cleared */
-        }
-    } else {
-        dsp->registers[DSP_REG_SR] &= ~(1 << DSP_SR_C);     /* Carry cleared when offset == 0 */
-    }
-
-    dsp->instr_cycle += 2;
 }
 
 static void emu_illegal(dsp_core_t* dsp)

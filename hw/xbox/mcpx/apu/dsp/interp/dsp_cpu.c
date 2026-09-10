@@ -3,7 +3,6 @@
  *
  * Copyright (c) 2015 espes
  * Copyright (c) 2020-2025 Matt Borgerson
- * Copyright (c) 2026 Will Bonnett
  *
  * Adapted from Hatari DSP M56001 emulation
  * (C) 2003-2008 ARAnyM developer team
@@ -32,9 +31,7 @@
 
 #define BITMASK(x)  ((1<<(x))-1)
 
-#ifndef TRACE_DSP_DISASM
 #define TRACE_DSP_DISASM 0
-#endif
 #define TRACE_DSP_DISASM_REG 0
 #define TRACE_DSP_DISASM_MEM 0
 
@@ -183,7 +180,7 @@ static const OpcodeEntry nonparallel_opcodes[] = {
     { "0000110011pppppp0S0bbbbb", "brclr #n, [X or Y]:pp, xxxx", dis_brclr_pp, emu_brclr_pp },
     { "0000010010qqqqqq0S0bbbbb", "brclr #n, [X or Y]:qq, xxxx", NULL, NULL },
     { "0000110011DDDDDD100bbbbb", "brclr #n, S, xxxx", dis_brclr_reg, emu_brclr_reg },
-    { "000000000000CCCC00001001", "brkcc", NULL, emu_brk_cc },
+    { "00000000000000100001CCCC", "brkcc", NULL, NULL },
     { "0000110010MMMRRR0S1bbbbb", "brset #n, [X or Y]:ea, xxxx", NULL, NULL, match_MMMRRR },
     { "0000110010aaaaaa1S1bbbbb", "brset #n, [X or Y]:aa, xxxx", NULL, NULL },
     { "0000110011pppppp0S1bbbbb", "brset #n, [X or Y]:pp, xxxx", dis_brset_pp, emu_brset_pp },
@@ -228,7 +225,7 @@ static const OpcodeEntry nonparallel_opcodes[] = {
     { "0000011000aaaaaa0S000000", "do [X or Y]:aa, expr", dis_do_aa, emu_do_aa },
     { "00000110iiiiiiii1000hhhh", "do #xxx, expr", dis_do_imm, emu_do_imm },
     { "0000011011DDDDDD00000000", "do S, expr", dis_do_reg, emu_do_reg },
-    { "000000000000000100000000", "do forever, expr", NULL, emu_do_forever },
+    { "000000000000001000000011", "do_f", NULL, NULL },
     { "0000011001MMMRRR0S010000", "dor [X or Y]:ea, label", NULL, NULL, match_MMMRRR },
     { "0000011000aaaaaa0S010000", "dor [X or Y]:aa, label", NULL, NULL },
     { "00000110iiiiiiii1001hhhh", "dor #xxx, label", dis_dor_imm, emu_dor_imm },
@@ -240,8 +237,7 @@ static const OpcodeEntry nonparallel_opcodes[] = {
     { "0000110000011010000sSSSD", "extract S1, S2, D", NULL, NULL },
     { "0000110000011000000s000D", "extract #CO, S2, D", NULL, NULL },
     { "0000110000011010100sSSSD", "extractu S1, S2, D", NULL, NULL },
-    { "0000110000011000100s000D", "extractu #CO, S2, D", dis_extractu, emu_extractu },
-    { "00001100wwwwwwooooood00s", "extractu #CO, S2, D", dis_extractu, emu_extractu },
+    { "0000110000011000100s000D", "extractu #CO, S2, D", NULL, NULL },
     { "000000000000000000000101", "ill", NULL, emu_illegal },
     { "00000000000000000000100d", "inc D", NULL, emu_inc },
     { "00001100000110110qqqSSSD", "insert S1, S2, D", NULL, NULL },
@@ -624,12 +620,10 @@ void dsp56k_execute_instruction(dsp_core_t* dsp)
     }
 
     if (dsp->cur_inst < 0x100000) {
-        const OpcodeEntry *op = (dsp->pc < DSP_PRAM_SIZE) ? dsp->pram_opcache[dsp->pc] : NULL;
+        const OpcodeEntry *op = dsp->pram_opcache[dsp->pc];
         if (op == NULL) {
             op = lookup_opcode(dsp->cur_inst);
-            if (dsp->pc < DSP_PRAM_SIZE) {
-                dsp->pram_opcache[dsp->pc] = op;
-            }
+            dsp->pram_opcache[dsp->pc] = op;
         }
         if (op->emu_func) {
             op->emu_func(dsp);
@@ -715,29 +709,24 @@ static void dsp_postexecute_update_pc(dsp_core_t* dsp)
 
     /* When running a DO loop, we test the end of loop with the */
     /* updated PC, pointing to last instruction of the loop */
-    if (dsp->registers[DSP_REG_SR] & (1 << DSP_SR_LF)) {
+    if (dsp->registers[DSP_REG_SR] & (1<<DSP_SR_LF)) {
+
         /* Did we execute the last instruction in loop ? */
         if (dsp->pc == dsp->registers[DSP_REG_LA] + 1) {
-            /* Check if this is an infinite DO FOREVER loop */
-            if (dsp->registers[DSP_REG_SR] & (1 << DSP_SR_FV)) {
-                /* Loop indefinitely back to loop start (SSH) without decrementing LC */
-                dsp->pc = dsp->registers[DSP_REG_SSH];
+            --dsp->registers[DSP_REG_LC];
+            dsp->registers[DSP_REG_LC] &= BITMASK(16);
+
+            if (dsp->registers[DSP_REG_LC] == 0) {
+                /* end of loop */
+                uint32_t saved_pc, saved_sr;
+
+                dsp_stack_pop(dsp, &saved_pc, &saved_sr);
+                dsp->registers[DSP_REG_SR] &= 0x7f;
+                dsp->registers[DSP_REG_SR] |= saved_sr & (1<<DSP_SR_LF);
+                dsp_stack_pop(dsp, &dsp->registers[DSP_REG_LA], &dsp->registers[DSP_REG_LC]);
             } else {
-                --dsp->registers[DSP_REG_LC];
-                dsp->registers[DSP_REG_LC] &= BITMASK(16);
-
-                if (dsp->registers[DSP_REG_LC] == 0) {
-                    /* end of loop */
-                    uint32_t saved_pc, saved_sr;
-
-                    dsp_stack_pop(dsp, &saved_pc, &saved_sr);
-                    dsp->registers[DSP_REG_SR] &= 0x7f;
-                    dsp->registers[DSP_REG_SR] |= saved_sr & ((1 << DSP_SR_LF) | (1 << DSP_SR_FV));
-                    dsp_stack_pop(dsp, &dsp->registers[DSP_REG_LA], &dsp->registers[DSP_REG_LC]);
-                } else {
-                    /* Loop one more time */
-                    dsp->pc = dsp->registers[DSP_REG_SSH];
-                }
+                /* Loop one more time */
+                dsp->pc = dsp->registers[DSP_REG_SSH];
             }
         }
     }
@@ -896,21 +885,13 @@ static void dsp_postexecute_interrupts(dsp_core_t* dsp)
  *  Read/Write memory functions
  **********************************/
 
-static uint32_t read_memory_p(dsp_core_t *core, uint32_t address)
+static uint32_t read_memory_p(dsp_core_t* dsp, uint32_t address)
 {
-    if (address >= DSP_PRAM_SIZE) {
-        static uint32_t last_fault_pc = 0xFFFFFFFF;
-        if (core->pc != last_fault_pc) {
-            fprintf(stderr, "[PRAM FAULT] %s: Read at 0x%06X exceeds DSP_PRAM_SIZE (0x%06X) at PC 0x%06X. Halting core.\n",
-                    core->is_gp ? "GP" : "EP", address, DSP_PRAM_SIZE, core->pc);
-            last_fault_pc = core->pc;
-        }
-        core->halt_requested = true;
-        core->is_idle = true;
-        return 0x000000;
-    }
-
-    return core->pram[address];
+    assert((address & 0xFF000000) == 0);
+    assert(address < DSP_PRAM_SIZE);
+    uint32_t r = ldl_le_p(&dsp->pram[address]);
+    assert((r & 0xFF000000) == 0);
+    return r;
 }
 
 uint32_t dsp56k_read_memory(dsp_core_t* dsp, int space, uint32_t address)
@@ -925,6 +906,8 @@ uint32_t dsp56k_read_memory(dsp_core_t* dsp, int space, uint32_t address)
             return dsp->mixbuffer[address-DSP_MIXBUFFER_BASE];
         } else if (address >= 0xc00 && address < 0xc00+DSP_MIXBUFFER_SIZE) {
             return dsp->mixbuffer[address-0xc00];
+        } else if (address >= 0x4000 && address < 0x6000) {
+            return 0; /* EP external aperture read */
         } else {
             if (address < DSP_XRAM_SIZE) {
                 return dsp->xram[address];
@@ -966,6 +949,9 @@ static void write_memory_raw(dsp_core_t* dsp, int space, uint32_t address, uint3
             dsp->mixbuffer[address-DSP_MIXBUFFER_BASE] = value;
         } else if (address >= 0xc00 && address < 0xc00+DSP_MIXBUFFER_SIZE) {
             dsp->mixbuffer[address-0xc00] = value;
+        } else if (address >= 0x4000 && address < 0x6000) {
+            /* EP external memory aperture write - safely accept */
+            return;
         } else {
             assert(address < DSP_XRAM_SIZE);
             dsp->xram[address] = value;
@@ -974,11 +960,7 @@ static void write_memory_raw(dsp_core_t* dsp, int space, uint32_t address, uint3
         assert(address < DSP_YRAM_SIZE);
         dsp->yram[address] = value;
     } else if (space == DSP_SPACE_P) {
-        if (address >= DSP_PRAM_SIZE) {
-            fprintf(stderr, "[PRAM FAULT] %s: Write at 0x%06X exceeds DSP_PRAM_SIZE (0x%06X)\n",
-                    dsp->is_gp ? "GP" : "EP", address, DSP_PRAM_SIZE);
-            return;
-        }
+        assert(address < DSP_PRAM_SIZE);
         stl_le_p(&dsp->pram[address], value);
         dsp->pram_opcache[address] = NULL;
     } else {
@@ -1091,8 +1073,6 @@ static void dsp_stack_push(dsp_core_t* dsp, uint32_t curpc, uint32_t cursr, uint
     if ((stack_error==0) && (stack & (1<<DSP_SP_SE))) {
         /* Stack full, raise interrupt */
         dsp56k_add_interrupt(dsp, DSP_INTER_STACK_ERROR);
-        fprintf(stderr, "[STACK OVERFLOW WARNING] Attempted dsp_stack_push with stack full at PC 0x%06X (SP=0x%02X)\n",
-                dsp->pc, dsp->registers[DSP_REG_SP]);
         DPRINTF("Dsp: Stack Overflow\n");
         if (dsp->exception_debugging)
             assert(!"dsp stack overflow");
@@ -1120,28 +1100,24 @@ static void dsp_stack_push(dsp_core_t* dsp, uint32_t curpc, uint32_t cursr, uint
 
 static void dsp_stack_pop(dsp_core_t* dsp, uint32_t *newpc, uint32_t *newsr)
 {
-    uint32_t sp = dsp->registers[DSP_REG_SP] & BITMASK(4);
-    if (sp == 0) {
-        static uint32_t last_warn_pc = 0xFFFFFFFF;
-        if (dsp->pc != last_warn_pc) {
-            fprintf(stderr, "[STACK UNDERFLOW WARNING] Attempted dsp_stack_pop with SP == 0 at PC 0x%06X\n", dsp->pc);
-            last_warn_pc = dsp->pc;
-        }
-        if (newpc) *newpc = dsp->registers[DSP_REG_SSH];
-        if (newsr) *newsr = dsp->registers[DSP_REG_SR];
-        return;
-    }
-
     uint32_t stack_error, underflow, stack;
 
     stack_error = dsp->registers[DSP_REG_SP] & (1<<DSP_SP_SE);
     underflow = dsp->registers[DSP_REG_SP] & (1<<DSP_SP_UF);
-    stack = sp - 1;
+    stack = (dsp->registers[DSP_REG_SP] & BITMASK(4)) - 1;
+
+    if ((stack_error==0) && (stack & (1<<DSP_SP_SE))) {
+        /* Stack empty*/
+        dsp56k_add_interrupt(dsp, DSP_INTER_STACK_ERROR);
+        DPRINTF("Dsp: Stack underflow\n");
+        if (dsp->exception_debugging)
+            assert(!"Dsp stack underflow");
+    }
 
     dsp->registers[DSP_REG_SP] = (underflow | stack_error | stack) & BITMASK(6);
     stack &= BITMASK(4);
-    if (newpc) *newpc = dsp->registers[DSP_REG_SSH];
-    if (newsr) *newsr = dsp->registers[DSP_REG_SSL];
+    *newpc = dsp->registers[DSP_REG_SSH];
+    *newsr = dsp->registers[DSP_REG_SSL];
 
     dsp->registers[DSP_REG_SSH] = dsp->stack[0][stack];
     dsp->registers[DSP_REG_SSL] = dsp->stack[1][stack];

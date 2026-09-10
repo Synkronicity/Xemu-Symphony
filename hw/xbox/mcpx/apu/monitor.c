@@ -19,15 +19,70 @@
 
 #include "apu_int.h"
 
-float ext_surround_buf[6][256];
-int ext_surround_idx = 0;
-
 void mcpx_apu_monitor_init(MCPXAPUState *d, Error **errp)
 {
+    bool eeprom_wants_surround = false;
+    uint32_t audio_flags = 0;
+    const char *eeprom_path = g_config.sys.files.eeprom_path;
+    if (!eeprom_path || !eeprom_path[0]) {
+        eeprom_path = xemu_settings_get_default_eeprom_path();
+    }
+    if (eeprom_path) {
+        FILE *fp = fopen(eeprom_path, "rb");
+        if (fp) {
+            uint32_t user_block[4] = {0};
+            if (fseek(fp, 0x90, SEEK_SET) == 0 &&
+                fread(user_block, sizeof(uint32_t), 4, fp) == 4) {
+                user_block[0] = le32_to_cpu(user_block[0]);
+                user_block[1] = le32_to_cpu(user_block[1]);
+                user_block[2] = le32_to_cpu(user_block[2]);
+                user_block[3] = le32_to_cpu(user_block[3]);
+
+                fprintf(stderr,
+                        "[APU MONITOR] EEPROM Config Block: [0x90]=0x%08X [0x94]=0x%08X [0x98]=0x%08X [0x9C]=0x%08X\n",
+                        user_block[0], user_block[1], user_block[2], user_block[3]);
+
+                audio_flags = user_block[2];
+                if ((audio_flags & 0x00010000) || (audio_flags & 0x00000002)) {
+                    eeprom_wants_surround = true;
+                } else if ((user_block[3] & 0x00010000) || (user_block[3] & 0x00000002)) {
+                    audio_flags = user_block[3];
+                    eeprom_wants_surround = true;
+                }
+            }
+            fclose(fp);
+        }
+    }
+
+    const char *env_surround = getenv("XEMU_SURROUND");
+    bool env_wants_surround = env_surround &&
+                              strcmp(env_surround, "0") != 0 &&
+                              strcasecmp(env_surround, "false") != 0;
+    bool surround_requested = eeprom_wants_surround || env_wants_surround;
+
+    fprintf(stderr,
+            "[APU MONITOR] EEPROM audio flags: 0x%08X (Surround requested: %s)\n",
+            audio_flags, surround_requested ? "yes" : "no");
+
+    /* Firmware-gated surround activation: verify EP P-RAM is populated */
+    uint32_t reset_vec = dsp_read_memory(d->ep.dsp, 'P', 0x0000) & 0x00FFFFFF;
+    if (reset_vec == 0 || reset_vec == 0x00CACACA) {
+        dsp_bootstrap_ep_firmware(d->ep.dsp);
+        reset_vec = dsp_read_memory(d->ep.dsp, 'P', 0x0000) & 0x00FFFFFF;
+    }
+
+    bool fw_present = (reset_vec != 0 && reset_vec != 0x00CACACA);
+    d->is_5_1_active = (surround_requested && fw_present);
+
+    fprintf(stderr, "[APU MONITOR] Audio mode: %s (%d channels)%s\n",
+            d->is_5_1_active ? "5.1 Surround" : "Stereo",
+            d->is_5_1_active ? 6 : 2,
+            (!fw_present && surround_requested) ? " [Fallback: EP firmware missing]" : "");
+
     SDL_AudioSpec spec = {
         .freq = 48000,
         .format = SDL_AUDIO_S16LE,
-        .channels = 6, /* Changed from 2 to support discrete 5.1 LPCM natively */
+        .channels = d->is_5_1_active ? 6 : 2,
     };
 
     d->monitor.stream = NULL;
@@ -55,7 +110,8 @@ void mcpx_apu_monitor_init(MCPXAPUState *d, Error **errp)
                           SDL_AUDIO_BYTESIZE(spec.format) *
                           spec.freq / dev_spec.freq;
     }
-    int frame_bytes = 256 * spec.channels * sizeof(int16_t);
+    int frame_bytes = d->is_5_1_active ? sizeof(d->monitor.surround_buf)
+                                       : sizeof(d->monitor.frame_buf);
     int drain = MAX(dev_drain_bytes, frame_bytes);
     d->monitor.queued_bytes_low = drain;
     d->monitor.queued_bytes_high = 3 * drain;
@@ -77,40 +133,17 @@ void mcpx_apu_monitor_frame(MCPXAPUState *d)
     }
 
     if (d->monitor.stream) {
-        int16_t interleaved[6 * 256];
-        if (d->is_5_1_active) {
-            for (int i = 0; i < 256; i++) {
-                float fl  = ext_surround_buf[0][i];
-                float fr  = ext_surround_buf[1][i];
-                float fc  = ext_surround_buf[2][i];
-                float lfe = ext_surround_buf[3][i];
-                float rl  = ext_surround_buf[4][i];
-                float rr  = ext_surround_buf[5][i];
-
-                interleaved[i * 6 + 0] = (int16_t)MAX(-32768.0f, MIN(32767.0f, fl * 32767.0f));
-                interleaved[i * 6 + 1] = (int16_t)MAX(-32768.0f, MIN(32767.0f, fr * 32767.0f));
-                interleaved[i * 6 + 2] = (int16_t)MAX(-32768.0f, MIN(32767.0f, fc * 32767.0f));
-                interleaved[i * 6 + 3] = (int16_t)MAX(-32768.0f, MIN(32767.0f, lfe * 32767.0f));
-                interleaved[i * 6 + 4] = (int16_t)MAX(-32768.0f, MIN(32767.0f, rl * 32767.0f));
-                interleaved[i * 6 + 5] = (int16_t)MAX(-32768.0f, MIN(32767.0f, rr * 32767.0f));
-            }
-            ext_surround_idx = 0;
-        } else {
-            /* Stereo fallback: map L/R to front channels and silence center/sub/surrounds */
-            for (int i = 0; i < 256; i++) {
-                interleaved[i * 6 + 0] = d->monitor.frame_buf[i][0];
-                interleaved[i * 6 + 1] = d->monitor.frame_buf[i][1];
-                interleaved[i * 6 + 2] = 0;
-                interleaved[i * 6 + 3] = 0;
-                interleaved[i * 6 + 4] = 0;
-                interleaved[i * 6 + 5] = 0;
-            }
-        }
-
         float vu = pow(fmax(0.0, fmin(g_config.audio.volume_limit, 1.0)), M_E);
         SDL_SetAudioStreamGain(d->monitor.stream, vu);
-        SDL_PutAudioStreamData(d->monitor.stream, interleaved, sizeof(interleaved));
+        if (d->is_5_1_active) {
+            SDL_PutAudioStreamData(d->monitor.stream, d->monitor.surround_buf,
+                                   sizeof(d->monitor.surround_buf));
+        } else {
+            SDL_PutAudioStreamData(d->monitor.stream, d->monitor.frame_buf,
+                                   sizeof(d->monitor.frame_buf));
+        }
     }
 
     memset(d->monitor.frame_buf, 0, sizeof(d->monitor.frame_buf));
+    memset(d->monitor.surround_buf, 0, sizeof(d->monitor.surround_buf));
 }

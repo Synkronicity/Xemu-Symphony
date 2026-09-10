@@ -138,16 +138,16 @@ static void dsp_jit_set_cycle_count(DSPState *dsp, uint32_t count)
     dsp56300_set_cycle_count(jit_be(dsp)->jit, count);
 }
 
-static void dsp_jit_invalidate_opcache(DSPState *dsp)
-{
-    dsp56300_invalidate_cache(jit_be(dsp)->jit);
-}
-
 static uint32_t dsp_jit_get_pc(DSPState *dsp)
 {
     Dsp56300State ss;
     dsp56300_get_state(jit_be(dsp)->jit, &ss);
     return ss.pc;
+}
+
+static void dsp_jit_invalidate_opcache(DSPState *dsp)
+{
+    dsp56300_invalidate_cache(jit_be(dsp)->jit);
 }
 
 /*
@@ -307,10 +307,10 @@ static JitBackend *dsp_create_jit_backend(DSPState *dsp)
           .data = { .buffer = { .base = be->yram, .offset = 0 } } },
     };
 
-    /* P-space: PRAM [0, 0x1000) */
+    /* P-space: PRAM [0, DSP_PRAM_SIZE) */
     Dsp56300MemoryRegion p_regions[1] = {
         { .start = 0x0000,
-          .end = 0x1000,
+          .end = DSP_PRAM_SIZE,
           .kind = DSP56300_REGION_BUFFER,
           .data = { .buffer = { .base = be->pram, .offset = 0 } } },
     };
@@ -356,7 +356,6 @@ const DSPOps jit_dsp_ops = {
     .finalize = dsp_jit_finalize,
     .reset = dsp_jit_reset,
     .step = dsp_jit_step,
-    .get_pc = dsp_jit_get_pc,
     .run = dsp_jit_run,
     .bootstrap = dsp_jit_bootstrap,
     .start_frame = dsp_start_frame_impl,
@@ -366,6 +365,7 @@ const DSPOps jit_dsp_ops = {
     .set_halt_requested = dsp_jit_set_halt_requested,
     .get_cycle_count = dsp_jit_get_cycle_count,
     .set_cycle_count = dsp_jit_set_cycle_count,
+    .get_pc = dsp_jit_get_pc,
     .invalidate_opcache = dsp_jit_invalidate_opcache,
     .sync_to_vm = dsp_jit_sync_to_vm,
     .sync_from_vm = dsp_jit_sync_from_vm,

@@ -99,7 +99,6 @@ typedef struct {
 
     uint32_t inbuf_sge_handle; //FIXME: Where is this stored?
     uint32_t outbuf_sge_handle; //FIXME: Where is this stored?
-
 } MCPXAPUVPState;
 
 extern const MemoryRegionOps vp_ops;
