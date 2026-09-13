@@ -1389,7 +1389,15 @@ static void voice_process(MCPXAPUState *d,
     bin[7] = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT,
                             NV_PAVS_VOICE_CFG_FMT_V7BIN);
 
+    uint16_t hrtf_handle = HRTF_NULL_HANDLE;
     if (v < MCPX_HW_MAX_3D_VOICES) {
+        hrtf_handle = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_HRTF_TARGET,
+                                     NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
+    }
+    bool use_hrtf = (v < MCPX_HW_MAX_3D_VOICES) && !stereo &&
+                    (hrtf_handle != HRTF_NULL_HANDLE) && g_config.audio.hrtf;
+
+    if (use_hrtf) {
         bin[0] = d->vp.hrtf_submix[0];
         bin[1] = d->vp.hrtf_submix[1];
         bin[2] = d->vp.hrtf_submix[2];
@@ -1467,13 +1475,8 @@ static void voice_process(MCPXAPUState *d,
         }
     }
 
-    if (v < MCPX_HW_MAX_3D_VOICES && g_config.audio.hrtf) {
-        uint16_t hrtf_handle =
-            voice_get_mask(d, v, NV_PAVS_VOICE_CFG_HRTF_TARGET,
-                           NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
-        if (hrtf_handle != HRTF_NULL_HANDLE) {
-            hrtf_filter_process(&d->vp.filters[v].hrtf, samples, samples);
-        }
+    if (use_hrtf) {
+        hrtf_filter_process(&d->vp.filters[v].hrtf, samples, samples);
     }
 
     // FIXME: ParaEQ
@@ -1481,7 +1484,7 @@ static void voice_process(MCPXAPUState *d,
     for (int b = 0; b < 8; b++) {
         float g = ea_value;
         float hr;
-        if ((v < MCPX_HW_MAX_3D_VOICES) && (b < 4)) {
+        if (use_hrtf && (b < 4)) {
             // FIXME: Not sure if submix/voice headroom factor in for HRTF
             hr = 1 << d->vp.hrtf_headroom;
         } else {
@@ -1554,8 +1557,18 @@ static void get_voice_bin_src_dst(MCPXAPUState *d, int v,
         }
     }
 
-    int bin[8];
+    bool stereo = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT,
+                                 NV_PAVS_VOICE_CFG_FMT_STEREO);
+    uint16_t hrtf_handle = HRTF_NULL_HANDLE;
     if (v < MCPX_HW_MAX_3D_VOICES) {
+        hrtf_handle = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_HRTF_TARGET,
+                                     NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
+    }
+    bool use_hrtf = (v < MCPX_HW_MAX_3D_VOICES) && !stereo &&
+                    (hrtf_handle != HRTF_NULL_HANDLE) && g_config.audio.hrtf;
+
+    int bin[8];
+    if (use_hrtf) {
         bin[0] = d->vp.hrtf_submix[0];
         bin[1] = d->vp.hrtf_submix[1];
         bin[2] = d->vp.hrtf_submix[2];
@@ -1884,7 +1897,10 @@ void mcpx_apu_vp_reset(MCPXAPUState *d)
     d->vp.ssl_base_page = 0;
     d->vp.hrtf_headroom = 0;
     memset(d->vp.ssl, 0, sizeof(d->vp.ssl));
-    memset(d->vp.hrtf_submix, 0, sizeof(d->vp.hrtf_submix));
+    d->vp.hrtf_submix[0] = 0;
+    d->vp.hrtf_submix[1] = 1;
+    d->vp.hrtf_submix[2] = 2;
+    d->vp.hrtf_submix[3] = 3;
     memset(d->vp.submix_headroom, 0, sizeof(d->vp.submix_headroom));
     memset(d->vp.voice_locked, 0, sizeof(d->vp.voice_locked));
     for (int v = 0; v < ARRAY_SIZE(d->vp.filters); v++) {
