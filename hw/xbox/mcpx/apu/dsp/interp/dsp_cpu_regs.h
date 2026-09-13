@@ -113,7 +113,7 @@
 #define DSP_SPACE_Y 0x01
 #define DSP_SPACE_P 0x02
 
-#define DSP_XRAM_SIZE 4096
+#define DSP_XRAM_SIZE 65536
 #define DSP_YRAM_SIZE 2048
 #define DSP_PRAM_SIZE 32768
 

@@ -964,7 +964,7 @@ uint32_t dsp56k_read_memory(dsp_core_t* dsp, int space, uint32_t address)
             if (address < DSP_XRAM_SIZE) {
                 return dsp->xram[address];
             } else {
-                fprintf(stderr, "Out of bounds read at %x!\n", address);
+                DPRINTF("Out of bounds read at %x!\n", address);
                 return 0x00FFFFFF; // FIXME: What does the DSP actually do in this case?
             }
         }
@@ -1004,8 +1004,11 @@ static void write_memory_raw(dsp_core_t* dsp, int space, uint32_t address, uint3
             /* EP external memory aperture write - safely accept */
             return;
         } else {
-            assert(address < DSP_XRAM_SIZE);
-            dsp->xram[address] = value;
+            if (address < DSP_XRAM_SIZE) {
+                dsp->xram[address] = value;
+            } else {
+                DPRINTF("Out of bounds X write at %x! (val: 0x%06x)\n", address, value);
+            }
         }
     } else if (space == DSP_SPACE_Y) {
         if (address >= DSP_PERIPH_BASE) {
