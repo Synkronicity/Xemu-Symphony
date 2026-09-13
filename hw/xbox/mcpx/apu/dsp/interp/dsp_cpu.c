@@ -929,13 +929,21 @@ static uint32_t read_memory_p(dsp_core_t* dsp, uint32_t address)
 static uint32_t read_memory_y(dsp_core_t* dsp, uint32_t address)
 {
     assert((address & 0xFF000000) == 0);
+    if (address >= DSP_PERIPH_BASE) {
+        assert(dsp->read_peripheral);
+        return dsp->read_peripheral(dsp, address) & 0x00FFFFFF;
+    }
     if (!dsp_core_is_gp(dsp)) {
         if (address >= 0x0800 && address <= 0x0FFF) {
             return ep_yrom[address - 0x0800] & 0x00FFFFFF;
         }
     }
-    assert(address < DSP_YRAM_SIZE);
-    return dsp->yram[address];
+    if (address < DSP_YRAM_SIZE) {
+        return dsp->yram[address];
+    } else {
+        fprintf(stderr, "Out of bounds Y read at %x!\n", address);
+        return 0x00FFFFFF;
+    }
 }
 
 uint32_t dsp56k_read_memory(dsp_core_t* dsp, int space, uint32_t address)
@@ -1000,12 +1008,20 @@ static void write_memory_raw(dsp_core_t* dsp, int space, uint32_t address, uint3
             dsp->xram[address] = value;
         }
     } else if (space == DSP_SPACE_Y) {
+        if (address >= DSP_PERIPH_BASE) {
+            assert(dsp->write_peripheral);
+            dsp->write_peripheral(dsp, address, value);
+            return;
+        }
         if (!dsp_core_is_gp(dsp) && address >= 0x0800 && address <= 0x0FFF) {
             /* EP on-chip Y data ROM (read-only factory ROM) - drop write */
             return;
         }
-        assert(address < DSP_YRAM_SIZE);
-        dsp->yram[address] = value;
+        if (address < DSP_YRAM_SIZE) {
+            dsp->yram[address] = value;
+        } else {
+            fprintf(stderr, "Out of bounds Y write at %x!\n", address);
+        }
     } else if (space == DSP_SPACE_P) {
         assert(address < DSP_PRAM_SIZE);
         stl_le_p(&dsp->pram[address], value);

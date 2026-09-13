@@ -94,6 +94,18 @@ uint32_t read_peripheral(DSPState *dsp, uint32_t address)
     case 0xFFFFD7:
         v = dsp_dma_read(&dsp->dma, DMA_CONFIGURATION);
         break;
+    /* DSP56300 Triple Timer registers ($FFFFE0 - $FFFFEF) */
+    case 0xFFFFE3: /* TCR0 */
+    case 0xFFFFE7: /* TCR1 */
+    case 0xFFFFEB: /* TCR2 */
+        v = (uint32_t)(dsp_get_cycle_count(dsp) & 0x00FFFFFF);
+        break;
+    case 0xFFFFE0 ... 0xFFFFE2: /* TCSR0, TLR0, TCPR0 */
+    case 0xFFFFE4 ... 0xFFFFE6: /* TCSR1, TLR1, TCPR1 */
+    case 0xFFFFE8 ... 0xFFFFEA: /* TCSR2, TLR2, TCPR2 */
+    case 0xFFFFEC ... 0xFFFFEF: /* Reserved timer registers */
+        v = 0;
+        break;
     }
 
     trace_dsp_read_peripheral(address, v);
@@ -141,6 +153,9 @@ void write_peripheral(DSPState *dsp, uint32_t address, uint32_t value)
         break;
     case 0xFFFFD7:
         dsp_dma_write(&dsp->dma, DMA_CONFIGURATION, value);
+        break;
+    case 0xFFFFE0 ... 0xFFFFEF:
+        /* Triple Timer registers: safely absorb timer control/load register writes */
         break;
     }
 
