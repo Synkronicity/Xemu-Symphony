@@ -75,6 +75,8 @@ void ac97_common_init (AC97LinkState *s,
                        PCIDevice *pci_dev,
                        AddressSpace *as);
 
+void ac97_step_playback(AC97LinkState *s, int bytes);
+
 extern const MemoryRegionOps ac97_io_nam_ops;
 extern const MemoryRegionOps ac97_io_nabm_ops;
 

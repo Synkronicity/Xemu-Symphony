@@ -29,6 +29,7 @@
 #include "qemu/error-report.h"
 #include "ac97_int.h"
 #include "ac97.h"
+#include "hw/xbox/mcpx/aci.h"
 
 #define SOFT_VOLUME
 #define SR_FIFOE 16             /* rwc */
@@ -228,7 +229,9 @@ static void voice_set_active(AC97LinkState *s, int bm_index, int on)
         break;
 
     case PO_INDEX:
+#ifndef XBOX
         AUD_set_active_out(s->voice_po, on);
+#endif
         break;
 
     case MC_INDEX:
@@ -315,6 +318,7 @@ static void open_voice(AC97LinkState *s, int index, int freq)
             break;
 
         case PO_INDEX:
+#ifndef XBOX
             s->voice_po = AUD_open_out(
                 s->audio_be,
                 s->voice_po,
@@ -323,6 +327,9 @@ static void open_voice(AC97LinkState *s, int index, int freq)
                 po_callback,
                 &as
                 );
+#else
+            s->voice_po = NULL;
+#endif
             break;
 
         case MC_INDEX:
@@ -352,7 +359,9 @@ static void open_voice(AC97LinkState *s, int index, int freq)
             break;
 
         case PO_INDEX:
+#ifndef XBOX
             AUD_close_out(s->audio_be, s->voice_po);
+#endif
             s->voice_po = NULL;
             break;
 
@@ -379,9 +388,14 @@ static void reset_voices(AC97LinkState *s, uint8_t active[LAST_INDEX])
     AUD_set_active_in(s->voice_pi, active[PI_INDEX]);
 #endif
 
+#ifndef XBOX
     freq = mixer_load(s, AC97_PCM_Front_DAC_Rate);
     open_voice(s, PO_INDEX, freq);
     AUD_set_active_out(s->voice_po, active[PO_INDEX]);
+#else
+    (void)freq;
+    (void)active;
+#endif
 
 #ifndef XBOX
     freq = mixer_load(s, AC97_MIC_ADC_Rate);
@@ -417,7 +431,13 @@ static void update_combined_volume_out(AC97LinkState *s)
     lvol = (lvol * plvol) / 255;
     rvol = (rvol * prvol) / 255;
 
+#ifndef XBOX
     AUD_set_volume_out_lr(s->voice_po, mute, lvol, rvol);
+#else
+    (void)mute;
+    (void)lvol;
+    (void)rvol;
+#endif
 }
 
 static void update_volume_in(AC97LinkState *s)
@@ -930,7 +950,9 @@ static int write_audio(AC97LinkState *s, AC97BusMasterRegs *r,
         int copied;
         to_copy = MIN(temp, sizeof(tmpbuf));
         dma_memory_read(s->as, addr, tmpbuf, to_copy, MEMTXATTRS_UNSPECIFIED);
-        copied = AUD_write(s->voice_po, tmpbuf, to_copy);
+        /* LLE: Push decoded PCM straight into ACI ring buffer */
+        mcpx_aci_push_pcm(tmpbuf, to_copy);
+        copied = to_copy;
         dolog("write_audio max=%x to_copy=%x copied=%x",
               max, to_copy, copied);
         if (!copied) {
@@ -974,10 +996,14 @@ static void write_bup(AC97LinkState *s, int elapsed)
     while (elapsed) {
         int temp = MIN(elapsed, sizeof(s->silence));
         while (temp) {
+#ifndef XBOX
             int copied = AUD_write(s->voice_po, s->silence, temp);
             if (!copied) {
                 return;
             }
+#else
+            int copied = temp;
+#endif
             temp -= copied;
             elapsed -= copied;
         }
@@ -1122,6 +1148,14 @@ static void mc_callback(void *opaque, int avail)
 static void po_callback(void *opaque, int free)
 {
     transfer_audio(opaque, PO_INDEX, free);
+}
+
+void ac97_step_playback(AC97LinkState *s, int bytes)
+{
+    AC97BusMasterRegs *r = &s->bm_regs[PO_INDEX];
+    if ((r->cr & CR_RPBM) && !(r->sr & SR_DCH)) {
+        transfer_audio(s, PO_INDEX, bytes);
+    }
 }
 
 static const VMStateDescription vmstate_ac97_bm_regs = {

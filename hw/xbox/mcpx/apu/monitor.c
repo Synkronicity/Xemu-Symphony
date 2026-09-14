@@ -19,6 +19,18 @@
  */
 
 #include "apu_int.h"
+#include "hw/xbox/mcpx/aci.h"
+
+static inline int16_t clamp16(int32_t val)
+{
+    if (val > 32767) {
+        return 32767;
+    }
+    if (val < -32768) {
+        return -32768;
+    }
+    return (int16_t)val;
+}
 
 void mcpx_apu_monitor_init(MCPXAPUState *d, Error **errp)
 {
@@ -131,6 +143,26 @@ void mcpx_apu_monitor_frame(MCPXAPUState *d)
 {
     if ((d->ep_frame_div + 1) % 8) {
         return;
+    }
+
+    int16_t aci_pcm[256 * 2];
+    size_t aci_samples = mcpx_aci_read_pcm(aci_pcm, 256);
+    if (aci_samples > 0) {
+        if (d->is_5_1_active) {
+            for (size_t i = 0; i < aci_samples; i++) {
+                int32_t fl = d->monitor.surround_buf[i][0] + aci_pcm[i * 2];
+                int32_t fr = d->monitor.surround_buf[i][1] + aci_pcm[i * 2 + 1];
+                d->monitor.surround_buf[i][0] = clamp16(fl);
+                d->monitor.surround_buf[i][1] = clamp16(fr);
+            }
+        } else {
+            for (size_t i = 0; i < aci_samples; i++) {
+                int32_t l = d->monitor.frame_buf[i][0] + aci_pcm[i * 2];
+                int32_t r = d->monitor.frame_buf[i][1] + aci_pcm[i * 2 + 1];
+                d->monitor.frame_buf[i][0] = clamp16(l);
+                d->monitor.frame_buf[i][1] = clamp16(r);
+            }
+        }
     }
 
     if (d->monitor.stream) {
