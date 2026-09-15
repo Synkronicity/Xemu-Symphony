@@ -85,7 +85,7 @@ struct dsp_core_s {
     int16_t interrupt_ipl[4];
     uint16_t interrupt_is_pending[4];
 
-    /* Back-pointer to owning DSPState (set by dsp_c.c) */
+    /* Back-pointer to owning DSPState (set by dsp_emu.c) */
     void *opaque;
 
     /* callbacks */
