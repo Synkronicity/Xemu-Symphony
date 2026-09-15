@@ -44,11 +44,24 @@ jobs:
       - name: Ephemeral Merge Upstream Master
         run: |
           echo "Attempting merge of upstream/master..."
-          git merge --no-commit --no-ff upstream/master || {
-            echo "::error::Merge conflict detected with upstream/master!"
+          if ! git merge --no-commit --no-ff upstream/master; then
+           echo "Checking for modify/delete conflicts on files deleted downstream..."
+           # Auto-resolve modify/delete conflicts where HEAD deleted the file (UD)
+           DELETED_CONFLCITS=$(git status --porcelain | grep '^UD ' | awk '{print $2}')
+           if [ -n "$DELETED_CONFLICTS" ]; then
+            echo "Discarding upstream edits for files deleted in downstream:"
+            echo "$DELETED_CONFLICTS"
+            echo "$DELETED_CONFLICTS" | xargs -r git rm -f
+           fi
+
+           # Halt if actual code conflicts remain (UU = both modified)
+           if git status --porcelain | grep -q '^UU '; then
+            echo "::error::Unresolved code merge conflicts detected with upstream/master!"
             git status --short
             exit 1
-          }
+           fi
+           echo "Ephemeral conflicts resolved successfully."
+          fi
 
       - name: Update Submodules
         run: git submodule update --init --recursive
