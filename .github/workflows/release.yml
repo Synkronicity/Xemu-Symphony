@@ -171,8 +171,8 @@ jobs:
       - name: Move Rolling Latest Tag
         if: github.ref == 'refs/heads/master'
         run: |
-          git tag -f latest HEAD
-          git push origin latest --force
+          git tag -f continuous HEAD
+          git push origin continuous --force
 
       - name: Download Windows Artifact
         uses: actions/download-artifact@v4
@@ -189,7 +189,7 @@ jobs:
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'continuous' }}
           name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Continuous Build' }}
           prerelease: ${{ startsWith(github.ref, 'refs/tags/beta') || !startsWith(github.ref, 'refs/tags/') }}
           generate_release_notes: true
