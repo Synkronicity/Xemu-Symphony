@@ -228,8 +228,8 @@ jobs:
 
       - name: Force Update Canary Tag
         run: |
-          git tag -f canary HEAD
-          git push origin canary --force
+          git tag -f canary-rolling HEAD
+          git push origin canary-rolling --force
 
       - name: Download Windows Binary
         uses: actions/download-artifact@v4
@@ -246,7 +246,7 @@ jobs:
       - name: Update Rolling Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: canary
+          tag_name: canary-rolling
           name: "Xemu Symphony (Canary Build)"
           prerelease: true
           make_latest: false
