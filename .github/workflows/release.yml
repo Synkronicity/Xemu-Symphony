@@ -101,7 +101,7 @@ jobs:
           sudo apt-get install -y ccache libfuse2 libusb-1.0-0-dev curl
 
           HTML="$(curl -fsSL --compressed "$POOL")"
-          VER="$(grep -oE 'libllvm21_[0-9][^0-9]+_${{ env.ARCH }}\.deb' <<<"$HTML" | head -n1 \
+          VER="$(grep -oE 'libllvm21_[0-9][^"]+_${{ env.ARCH }}\.deb' <<<"$HTML" | head -n1 \
             | sed -E 's/^libllvm21_//; s/_${{ env.ARCH }}\.deb$//')"
 
           mkdir -p /tmp/llvm21 && cd /tmp/llvm21
