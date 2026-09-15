@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2012 espes
  * Copyright (c) 2020-2021 Matt Borgerson
+ * Copyright (c) 2026 Will Bonnett
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public

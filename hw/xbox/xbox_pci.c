@@ -327,6 +327,10 @@ static void xbox_lpc_realize(PCIDevice *dev, Error **errp)
         return;
     }
     d->isa_bus = isa_bus;
+
+    /* Initialize hardware power-on defaults for LPC interrupt routing */
+    pci_set_long(dev->config + XBOX_LPC_INT_IRQ_ROUT, 0x0e065491);
+    pci_set_long(dev->config + XBOX_LPC_PIRQ_ROUT, 0x00031000);
 }
 
 static void xbox_lpc_enable_mcpx_rom(PCIDevice *dev, bool enable) {
@@ -342,8 +346,11 @@ static void xbox_lpc_enable_mcpx_rom(PCIDevice *dev, bool enable) {
 
 static void xbox_lpc_reset(DeviceState *dev)
 {
+    PCIDevice *d = PCI_DEVICE(dev);
     XBOXPCI_DPRINTF("ACTIVATING BOOT ROM\n");
-    xbox_lpc_enable_mcpx_rom(PCI_DEVICE(dev), true);
+    xbox_lpc_enable_mcpx_rom(d, true);
+    pci_set_long(d->config + XBOX_LPC_INT_IRQ_ROUT, 0x0e065491);
+    pci_set_long(d->config + XBOX_LPC_PIRQ_ROUT, 0x00031000);
 }
 
 static void xbox_lpc_reset_hold(Object *obj, ResetType type)
