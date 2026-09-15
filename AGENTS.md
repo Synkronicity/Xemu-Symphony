@@ -1,6 +1,6 @@
 # Operational Directives for Autonomous Agents & AI Assistants
 
-This repository (`xemu-dsp56362`) is a sovereign, performance-critical low-level emulator fork. Autonomous agents, LLMs, and assistive tooling operating on this codebase must adhere strictly to these architectural invariants, scoping constraints, and verification protocols.
+This repository (`Xemu-Symphony`) is a sovereign, performance-critical low-level emulator fork. Autonomous agents, LLMs, and assistive tooling operating on this codebase must adhere strictly to these architectural invariants, scoping constraints, and verification protocols.
 
 ---
 

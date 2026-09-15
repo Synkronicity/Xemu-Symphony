@@ -94,7 +94,7 @@ The Motorola DSP56362 Harvard architecture splits memory across three independen
 
 ## Comparison: Lossless Direct PCM Tap vs. Lossy S/PDIF Round-Trip
 
-| Feature | Upstream S/PDIF Round-Trip | `xemu-dsp56362` (This Fork) |
+| Feature | Upstream S/PDIF Round-Trip | `Xemu-Symphony` (This Fork) |
 | :---: | :--- | :--- |
 | **Audio Pipeline** | DSP encodes lossy AC-3 $\rightarrow$ Virtual S/PDIF $\rightarrow$ Host CPU decodes via `liba52` | **Lossless Direct Tap:** Discrete 6-channel PCM tapped directly from mixer RAM |
 | **Audio Fidelity** | Lossy 640 kbps compression artifacts | **100% Mathematical Precision (32-bit Float)** |
@@ -190,7 +190,7 @@ The internal monitor stream outputs audio in standard discrete DirectSound 5.1 s
 ---
 
 ## Roadmap
-1.  **Beta 1 Release (Current):** Stabilize pure-C Motorola DSP56362 LLE execution across retail library titles.
+1.  **Beta 2 Release (Current):** Stabilize pure-C Motorola DSP56362 LLE execution across retail library titles.
     
 2.  **Dynamic Range Management:** Implement soft-knee saturation curves across multi-channel apertures to prevent clipping on aggressive 0 dBFS Bink cutscene audio.
     

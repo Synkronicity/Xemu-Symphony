@@ -1,6 +1,6 @@
-# xemu-dsp56362: Technical Documentation & Architecture
+# Xemu-Symphony: Technical Documentation & Architecture
 
-Welcome to the architectural documentation for `xemu-dsp56362`, an independent low-level emulation (LLE) fork of Xemu focused on bit-accurate simulation of the original Xbox Motorola Symphony DSP56362 Encoding Processor (EP) and discrete 5.1 multichannel audio extraction.
+Welcome to the architectural documentation for `Xemu-Symphony`, an independent low-level emulation (LLE) fork of Xemu focused on bit-accurate simulation of the original Xbox Motorola Symphony DSP56362 Encoding Processor (EP) and discrete 5.1 multichannel audio extraction.
 
 ---
 
@@ -16,8 +16,8 @@ Welcome to the architectural documentation for `xemu-dsp56362`, an independent l
 
 * [Developer Style Guide](devel/style.rst)
 * [Code of Conduct](devel/code-of-conduct.rst)
-* [Architectural Invariants & Agent Directives](https://github.com/Synkronicity/xemu-dsp56362/blob/master/AGENTS.md)
-* [Contribution Guidelines](https://github.com/Synkronicity/xemu-dsp56362/blob/master/CONTRIBUTING.md)
+* [Architectural Invariants & Agent Directives](https://github.com/Synkronicity/Xemu-Symphony/blob/master/AGENTS.md)
+* [Contribution Guidelines](https://github.com/Synkronicity/Xemu-Symphony/blob/master/CONTRIBUTING.md)
 
 ---
 
