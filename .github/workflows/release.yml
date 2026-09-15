@@ -101,7 +101,7 @@ jobs:
           sudo apt-get install -y ccache libfuse2 libusb-1.0-0-dev curl
 
           HTML="$(curl -fsSL --compressed "$POOL")"
-          VER="$(grep -oE 'libllvm21_[0-9][^"]+_${{ env.ARCH }}\.deb' <<<"$HTML" | head -n1 \
+          VER="$(grep -oE 'libllvm21_[0-9][^0-9]+_${{ env.ARCH }}\.deb' <<<"$HTML" | head -n1 \
             | sed -E 's/^libllvm21_//; s/_${{ env.ARCH }}\.deb$//')"
 
           mkdir -p /tmp/llvm21 && cd /tmp/llvm21
@@ -124,7 +124,7 @@ jobs:
 
       - name: Create Debian Changelog
         run: |
-          echo -e "xemu (1:0.0.0-0) unstable; urgency=medium\n\n  * Release Build\n\n -- xemu-dsp56362 <release@xemu-dsp56362.local>  $(date -R)" > debian/changelog
+          echo -e "xemu (1:0.0.0-0) unstable; urgency=medium\n\n  * Release Build\n\n -- xemu-symphony <release@xemu-symphony.local>  $(date -R)" > debian/changelog
 
       - name: Compile Debian Package
         run: |
@@ -165,6 +165,15 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/master'
 
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Move Rolling Latest Tag
+        if: github.ref == 'refs/heads/master'
+        run: |
+          git tag -f latest HEAD
+          git push origin latest --force
+
       - name: Download Windows Artifact
         uses: actions/download-artifact@v4
         with:
@@ -182,7 +191,7 @@ jobs:
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
           name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Continuous Build' }}
-          prerelease: ${{ startsWith(github.ref, 'refs/tags/beta') }}
+          prerelease: ${{ startsWith(github.ref, 'refs/tags/beta') || !startsWith(github.ref, 'refs/tags/') }}
           generate_release_notes: true
           files: |
             release-bins/xemu-win64.exe

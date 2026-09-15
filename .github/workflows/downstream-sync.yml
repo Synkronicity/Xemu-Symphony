@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Downstream Branch
         uses: actions/checkout@v4
         with:
-          ref: feature/ep-surround-harmonized
+          ref: feature/xemu-dsp56362
           fetch-depth: 0
           submodules: recursive
 
@@ -65,7 +65,7 @@ jobs:
       - name: Package Release Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: xemu-win64-surround-alpha3-canary
+          name: xemu-win64-canary
           path: dist/xemu.exe
           retention-days: 14
 
@@ -96,7 +96,7 @@ jobs:
       - name: Checkout Downstream Branch
         uses: actions/checkout@v4
         with:
-          ref: feature/ep-surround-harmonized
+          ref: feature/xemu-dsp56362
           fetch-depth: 0
           submodules: recursive
 
@@ -154,9 +154,8 @@ jobs:
           sudo apt-get -qy update
           sudo apt-get install -y ccache libfuse2 libusb-1.0-0-dev curl
 
-          # Derive current package revision from repository pool
           HTML="$(curl -fsSL --compressed "$POOL")"
-          VER="$(grep -oE 'libllvm21_[0-9][^"]+_${{ env.ARCH }}\.deb' <<<"$HTML" | head -n1 \
+          VER="$(grep -oE 'libllvm21_[0-9][^0-9]+_${{ env.ARCH }}\.deb' <<<"$HTML" | head -n1 \
             | sed -E 's/^libllvm21_//; s/_${{ env.ARCH }}\.deb$//')"
           echo "Using pool version: $VER"
 
@@ -210,10 +209,10 @@ jobs:
       - name: Package AppImage Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: xemu-linux-x86_64-surround-alpha3-appimage
+          name: xemu-linux-x86_64-canary
           path: dist/xemu*.AppImage
           retention-days: 14
-          
+
   publish-canary-release:
     name: Publish Rolling Canary Release
     runs-on: ubuntu-latest
@@ -222,29 +221,39 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout Code to Move Canary Tag
+        uses: actions/checkout@v4
+        with:
+          ref: feature/xemu-dsp56362
+
+      - name: Force Update Canary Tag
+        run: |
+          git tag -f canary HEAD
+          git push origin canary --force
+
       - name: Download Windows Binary
         uses: actions/download-artifact@v4
         with:
-          name: xemu-win64-surround-alpha3-canary
+          name: xemu-win64-canary
           path: release-assets/
 
       - name: Download Linux AppImage
         uses: actions/download-artifact@v4
         with:
-          name: xemu-linux-x86_64-surround-alpha3-appimage
+          name: xemu-linux-x86_64-canary
           path: release-assets/
 
       - name: Update Rolling Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: canary
-          name: "Xemu Surround Edition (Canary Build)"
+          name: "Xemu Symphony (Canary Build)"
           prerelease: true
           make_latest: false
           body: |
-            Automated downstream build of Xemu featuring native 5.1 discrete LPCM surround output.
+            Automated downstream build of Xemu Symphony.
             
-            - Built automatically from branch: `feature/ep-surround-harmonized`
+            - Built automatically from branch: `feature/xemu-dsp56362`
             - Commit: ${{ github.sha }}
             - Upstream synchronization: Verified clean APU merge-base
           files: |
