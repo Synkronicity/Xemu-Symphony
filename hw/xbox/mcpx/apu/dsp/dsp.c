@@ -408,6 +408,7 @@ void dsp_bootstrap(DSPState *dsp)
             }
         }
         memset(core->pram_opcache, 0, sizeof(core->pram_opcache));
+        memset(core->predecode_table, 0, sizeof(core->predecode_table));
     }
 }
 
@@ -492,6 +493,7 @@ uint32_t dsp_get_pc(DSPState *dsp)
 void dsp_invalidate_opcache(DSPState *dsp)
 {
     memset(dsp->c_core->pram_opcache, 0, sizeof(dsp->c_core->pram_opcache));
+    memset(dsp->c_core->predecode_table, 0, sizeof(dsp->c_core->predecode_table));
 }
 
 void dsp_sync_to_vm(DSPState *dsp)
@@ -562,4 +564,5 @@ void dsp_sync_from_vm(DSPState *dsp)
            sizeof(core->interrupt_is_pending));
 
     memset(core->pram_opcache, 0, sizeof(core->pram_opcache));
+    memset(core->predecode_table, 0, sizeof(core->predecode_table));
 }

@@ -45,6 +45,31 @@ typedef struct dsp_interrupt_s {
 } dsp_interrupt_t;
 
 typedef struct dsp_core_s dsp_core_t;
+typedef struct dsp_decoded_op_s dsp_decoded_op_t;
+typedef void (*dsp_exec_fn_t)(dsp_core_t *dsp, const dsp_decoded_op_t *op);
+
+struct dsp_decoded_op_s {
+    dsp_exec_fn_t handler;                 /* 8 bytes: Top-level handler or fused PM engine */
+    void (*alu_handler)(dsp_core_t *dsp);  /* 8 bytes: Direct pointer to opcodes_alu function */
+    uint32_t imm_val;                      /* 4 bytes: Sign-extended 24-bit imm or address */
+    uint8_t  ea_mode;                      /* 1 byte : (cur_inst >> 8) & 0x3F */
+    uint8_t  inst_len;                     /* 1 byte : Instruction word length (1 or 2) */
+    uint8_t  instr_cycle;                  /* 1 byte : Cycle cost */
+    uint8_t  mem_space;                    /* 1 byte : Memory space flag */
+    uint8_t  reg_src1;                     /* 1 byte : Pre-decoded source register index */
+    uint8_t  reg_src2;                     /* 1 byte : Pre-decoded source register 2 */
+    uint8_t  reg_dst1;                     /* 1 byte : Pre-decoded destination register index */
+    uint8_t  reg_dst2;                     /* 1 byte : Pre-decoded destination register 2 */
+    uint8_t  flags;                        /* 1 byte : Status flags */
+    uint8_t  bit_index;                    /* 1 byte : Pre-extracted bit index */
+    uint16_t reserved;                     /* 2 bytes: Explicit padding */
+};
+
+_Static_assert(sizeof(dsp_decoded_op_t) == 32, "dsp_decoded_op_t must be exactly 32 bytes");
+
+#define DSP_OP_FLAG_VALID        (1 << 0)
+#define DSP_OP_FLAG_PARALLEL     (1 << 1)
+#define DSP_OP_FLAG_IMMUTABLE    (1 << 2)
 
 struct dsp_core_s {
     bool is_gp;
@@ -67,6 +92,7 @@ struct dsp_core_s {
     uint32_t yram[DSP_YRAM_SIZE];
     uint32_t pram[DSP_PRAM_SIZE];
     const void *pram_opcache[DSP_PRAM_SIZE];
+    dsp_decoded_op_t predecode_table[DSP_PRAM_SIZE];
 
     uint32_t mixbuffer[DSP_MIXBUFFER_SIZE];
 
