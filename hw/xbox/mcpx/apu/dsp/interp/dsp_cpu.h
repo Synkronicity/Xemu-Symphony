@@ -91,7 +91,6 @@ struct dsp_core_s {
     uint32_t xram[DSP_XRAM_SIZE];
     uint32_t yram[DSP_YRAM_SIZE];
     uint32_t pram[DSP_PRAM_SIZE];
-    const void *pram_opcache[DSP_PRAM_SIZE];
     dsp_decoded_op_t predecode_table[DSP_PRAM_SIZE];
 
     uint32_t mixbuffer[DSP_MIXBUFFER_SIZE];
@@ -170,6 +169,7 @@ struct dsp_core_s {
 /* Functions */
 void dsp56k_reset_cpu(dsp_core_t* dsp);		/* Set dsp_core to use */
 void dsp56k_execute_instruction(dsp_core_t* dsp);	/* Execute 1 instruction */
+const dsp_decoded_op_t *dsp_predecode_word(dsp_core_t* dsp, uint32_t pc);
 
 uint32_t dsp56k_read_memory(dsp_core_t* dsp, int space, uint32_t address);
 void dsp56k_write_memory(dsp_core_t* dsp, int space, uint32_t address, uint32_t value);
