@@ -601,7 +601,7 @@ static const char* disasm_get_instruction_text(dsp_core_t* dsp)
     return dsp->disasm_str_instr2;
 }
 
-static const dsp_decoded_op_t *dsp_predecode_word(dsp_core_t *dsp, uint32_t pc)
+const dsp_decoded_op_t *dsp_predecode_word(dsp_core_t *dsp, uint32_t pc)
 {
     uint32_t idx = pc & (DSP_PRAM_SIZE - 1);
     uint32_t inst = dsp->pram[idx];
@@ -617,9 +617,19 @@ static const dsp_decoded_op_t *dsp_predecode_word(dsp_core_t *dsp, uint32_t pc)
         op->alu_handler = opcodes_alu[inst & 0xFF];
         op->handler = (dsp_exec_fn_t)(void *)opcodes_parmove[(inst >> 20) & 0xF];
     } else {
+        const OpcodeEntry *entry = lookup_opcode(inst);
+        if (entry && entry->emu_func) {
+            op->handler = (dsp_exec_fn_t)(void *)entry->emu_func;
+        } else {
+            op->handler = (dsp_exec_fn_t)(void *)emu_undefined;
+        }
         op->flags = DSP_OP_FLAG_VALID;
         op->inst_len = 1;
         op->instr_cycle = 2;
+    }
+
+    if (!dsp->is_gp) {
+        op->flags |= DSP_OP_FLAG_IMMUTABLE;
     }
 
     return op;
@@ -629,74 +639,39 @@ void dsp56k_execute_instruction(dsp_core_t* dsp)
 {
     uint32_t entry_pc = dsp->pc;
     trace_dsp56k_execute_instruction(dsp->is_gp, dsp->pc);
-
-    uint32_t disasm_return = 0;
     dsp->disasm_memory_ptr = 0;
-
-    bool tracing = TRACE_DSP_DISASM || trace_event_get_state(TRACE_DSP56K_EXECUTE_INSTRUCTION_DISASM);
 
     const dsp_decoded_op_t *op = &dsp->predecode_table[dsp->pc];
     if (__builtin_expect(!(op->flags & DSP_OP_FLAG_VALID), 0)) {
         op = dsp_predecode_word(dsp, dsp->pc);
     }
 
-    if (op->flags & DSP_OP_FLAG_PARALLEL) {
-        dsp->cur_inst = dsp->pram[dsp->pc];
-        dsp->cur_inst_len = op->inst_len;
-        dsp->instr_cycle = op->instr_cycle;
+    /* Set current instruction word and default timing */
+    dsp->cur_inst = dsp->pram[dsp->pc];
+    dsp->cur_inst_len = op->inst_len;
+    dsp->instr_cycle = op->instr_cycle;
 
-        /* Disasm current instruction ? (trace mode only) */
-        if (tracing) {
-            disasm_return = disasm_instruction(dsp, DSP_TRACE_MODE);
-            if (disasm_return) {
-                const char *text = disasm_get_instruction_text(dsp);
-                trace_dsp56k_execute_instruction_disasm(text);
-                if (TRACE_DSP_DISASM) {
-                    DPRINTF("%s\n", text);
-                }
-                if (TRACE_DSP_DISASM_REG) {
-                    disasm_reg_save(dsp);
-                }
+    uint32_t disasm_return = 0;
+    bool tracing = TRACE_DSP_DISASM || trace_event_get_state(TRACE_DSP56K_EXECUTE_INSTRUCTION_DISASM);
+    if (__builtin_expect(tracing, 0)) {
+        disasm_return = disasm_instruction(dsp, DSP_TRACE_MODE);
+        if (disasm_return) {
+            const char *text = disasm_get_instruction_text(dsp);
+            trace_dsp56k_execute_instruction_disasm(text);
+            if (TRACE_DSP_DISASM) {
+                DPRINTF("%s\n", text);
             }
-        }
-
-        op->handler(dsp, op);
-    } else {
-        /* Decode and execute current non-parallel instruction */
-        dsp->cur_inst = read_memory_p(dsp, dsp->pc);
-        dsp->cur_inst_len = 1;
-        dsp->instr_cycle = 2;
-
-        /* Disasm current instruction ? (trace mode only) */
-        if (tracing) {
-            disasm_return = disasm_instruction(dsp, DSP_TRACE_MODE);
-            if (disasm_return) {
-                const char *text = disasm_get_instruction_text(dsp);
-                trace_dsp56k_execute_instruction_disasm(text);
-                if (TRACE_DSP_DISASM) {
-                    DPRINTF("%s\n", text);
-                }
-                if (TRACE_DSP_DISASM_REG) {
-                    disasm_reg_save(dsp);
-                }
+            if (TRACE_DSP_DISASM_REG) {
+                disasm_reg_save(dsp);
             }
-        }
-
-        const OpcodeEntry *legacy_op = dsp->pram_opcache[dsp->pc];
-        if (legacy_op == NULL) {
-            legacy_op = lookup_opcode(dsp->cur_inst);
-            dsp->pram_opcache[dsp->pc] = legacy_op;
-        }
-        if (legacy_op->emu_func) {
-            legacy_op->emu_func(dsp);
-        } else {
-            DPRINTF("%x - %s\n", dsp->cur_inst, legacy_op->name);
-            emu_undefined(dsp);
         }
     }
 
+    /* Single flat dispatch for 100% of instructions */
+    op->handler(dsp, op);
+
     /* Disasm current instruction ? (trace mode only) */
-    if (tracing && disasm_return) {
+    if (__builtin_expect(tracing && disasm_return, 0)) {
         if (TRACE_DSP_DISASM_REG) {
             disasm_reg_compare(dsp);
         }
@@ -1096,10 +1071,11 @@ static void write_memory_raw(dsp_core_t* dsp, int space, uint32_t address, uint3
     } else if (space == DSP_SPACE_P) {
         assert(address < DSP_PRAM_SIZE);
         stl_le_p(&dsp->pram[address], value);
-        dsp->pram_opcache[address] = NULL;
-        dsp->predecode_table[address].flags = 0;
-        if (address > 0) {
-            dsp->predecode_table[address - 1].flags = 0;
+        if (!(dsp->predecode_table[address].flags & DSP_OP_FLAG_IMMUTABLE)) {
+            dsp->predecode_table[address].flags = 0;
+            if (address > 0 && !(dsp->predecode_table[address - 1].flags & DSP_OP_FLAG_IMMUTABLE)) {
+                dsp->predecode_table[address - 1].flags = 0;
+            }
         }
     } else {
         assert(!"Invalid dsp space in write raw memory");
