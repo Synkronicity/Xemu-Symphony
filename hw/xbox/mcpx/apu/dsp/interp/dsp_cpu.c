@@ -402,6 +402,8 @@ void dsp56k_reset_cpu(dsp_core_t* dsp)
     dsp->loop_rep = 0;
     dsp->is_idle = false;
     dsp->cycle_count = 0;
+    dsp->spin_count = 0;
+    dsp->last_spin_pc = 0xFFFFFFFF;
     if (dsp->opaque) {
         dsp_set_halt_requested((DSPState *)dsp->opaque, false);
     }
@@ -600,6 +602,7 @@ static const char* disasm_get_instruction_text(dsp_core_t* dsp)
 
 void dsp56k_execute_instruction(dsp_core_t* dsp)
 {
+    uint32_t entry_pc = dsp->pc;
     trace_dsp56k_execute_instruction(dsp->is_gp, dsp->pc);
 
     uint32_t disasm_return = 0;
@@ -665,6 +668,25 @@ void dsp56k_execute_instruction(dsp_core_t* dsp)
 
     /* Process the PC */
     dsp_postexecute_update_pc(dsp);
+
+    /* Centralized Spin-Wait Evaluation */
+    if (dsp->pc == entry_pc && !dsp->loop_rep) {
+        if (entry_pc == dsp->last_spin_pc) {
+            dsp->spin_count++;
+            if (dsp->spin_count >= 4) {
+                dsp->is_idle = true;
+                if (dsp->opaque) {
+                    dsp_set_halt_requested((DSPState *)dsp->opaque, true);
+                }
+                dsp->spin_count = 0;
+            }
+        } else {
+            dsp->last_spin_pc = entry_pc;
+            dsp->spin_count = 1;
+        }
+    } else {
+        dsp->spin_count = 0;
+    }
 
     /* Process Interrupts */
     dsp_postexecute_interrupts(dsp);

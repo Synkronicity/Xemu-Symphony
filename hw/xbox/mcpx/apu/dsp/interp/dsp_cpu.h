@@ -50,6 +50,8 @@ struct dsp_core_s {
     bool is_gp;
     bool is_idle;
     uint32_t cycle_count;
+    uint32_t spin_count;
+    uint32_t last_spin_pc;
 
     /* DSP instruction Cycle counter */
     uint16_t instr_cycle;

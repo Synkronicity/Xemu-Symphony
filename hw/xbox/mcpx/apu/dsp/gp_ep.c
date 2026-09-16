@@ -499,9 +499,9 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
         dsp_start_frame(d->gp.dsp);
         dsp_set_halt_requested(d->gp.dsp, false);
         dsp_set_cycle_count(d->gp.dsp, 0);
-        do {
+        while (!dsp_get_halt_requested(d->gp.dsp) && d->gp.realtime) {
             dsp_run(d->gp.dsp, 1000);
-        } while (!dsp_get_halt_requested(d->gp.dsp) && d->gp.realtime);
+        }
         g_dbg.gp.cycles = dsp_get_cycle_count(d->gp.dsp);
 
         if (!d->is_5_1_active) {
