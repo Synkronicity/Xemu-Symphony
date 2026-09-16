@@ -153,4 +153,8 @@ void dsp56k_add_interrupt(dsp_core_t* dsp, uint16_t inter);
 void dsp_stack_push_ssh(dsp_core_t* dsp, uint32_t value);
 uint32_t dsp_stack_pop_ssh(dsp_core_t* dsp);
 
+static inline int32_t signextend24(uint32_t val) {
+    return (int32_t)(val << 8) >> 8;
+}
+
 #endif	/* DSP_CPU_H */

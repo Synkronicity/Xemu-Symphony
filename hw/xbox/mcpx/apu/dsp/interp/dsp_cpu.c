@@ -1330,64 +1330,20 @@ static uint16_t dsp_sub56(uint32_t *source, uint32_t *dest)
 
 static void dsp_mul56(uint32_t source1, uint32_t source2, uint32_t *dest, uint8_t signe)
 {
-    uint32_t part[4], zerodest[3], value;
-
-    /* Multiply: D = S1*S2 */
-    if (source1 & (1<<23)) {
-        signe ^= 1;
-        source1 = (1<<24) - source1;
-    }
-    if (source2 & (1<<23)) {
-        signe ^= 1;
-        source2 = (1<<24) - source2;
-    }
-
-    /* bits 0-11 * bits 0-11 */
-    part[0]=(source1 & BITMASK(12))*(source2 & BITMASK(12));
-    /* bits 12-23 * bits 0-11 */
-    part[1]=((source1>>12) & BITMASK(12))*(source2 & BITMASK(12));
-    /* bits 0-11 * bits 12-23 */
-    part[2]=(source1 & BITMASK(12))*((source2>>12)  & BITMASK(12));
-    /* bits 12-23 * bits 12-23 */
-    part[3]=((source1>>12) & BITMASK(12))*((source2>>12) & BITMASK(12));
-
-    /* Calc dest 2 */
-    dest[2] = part[0];
-    dest[2] += (part[1] & BITMASK(12)) << 12;
-    dest[2] += (part[2] & BITMASK(12)) << 12;
-
-    /* Calc dest 1 */
-    dest[1] = (part[1]>>12) & BITMASK(12);
-    dest[1] += (part[2]>>12) & BITMASK(12);
-    dest[1] += part[3];
-
-    /* Calc dest 0 */
-    dest[0] = 0;
-
-    /* Add carries */
-    value = (dest[2]>>24) & BITMASK(8);
-    if (value) {
-        dest[1] += value;
-        dest[2] &= BITMASK(24);
-    }
-    value = (dest[1]>>24) & BITMASK(8);
-    if (value) {
-        dest[0] += value;
-        dest[1] &= BITMASK(24);
-    }
-
-    /* Get rid of extra sign bit */
-    dsp_asl56(dest, 1);
+    int64_t s1 = (int64_t)signextend24(source1);
+    int64_t s2 = (int64_t)signextend24(source2);
+    int64_t prod = s1 * s2;
 
     if (signe) {
-        zerodest[0] = zerodest[1] = zerodest[2] = 0;
-
-        dsp_sub56(dest, zerodest);
-
-        dest[0] = zerodest[0];
-        dest[1] = zerodest[1];
-        dest[2] = zerodest[2];
+        prod = -prod;
     }
+
+    /* Fractional multiplication: Q23 x Q23 -> Q46, left-shift 1 to Q47 */
+    uint64_t u_prod = (uint64_t)prod << 1;
+
+    dest[2] = (uint32_t)(u_prod & 0x00FFFFFF);
+    dest[1] = (uint32_t)((u_prod >> 24) & 0x00FFFFFF);
+    dest[0] = (uint32_t)((u_prod >> 48) & BITMASK(8));
 }
 
 static void dsp_rnd56(dsp_core_t* dsp, uint32_t *dest)
@@ -1433,6 +1389,9 @@ static void dsp_rnd56(dsp_core_t* dsp, uint32_t *dest)
 }
 
 static uint32_t dsp_signextend(int bits, uint32_t v) {
+    if (__builtin_expect(bits == 24, 1)) {
+        return (uint32_t)signextend24(v);
+    }
     const int shift = sizeof(int)*8 - bits;
     assert(shift > 0);
     return (uint32_t)(((int32_t)v << shift) >> shift);

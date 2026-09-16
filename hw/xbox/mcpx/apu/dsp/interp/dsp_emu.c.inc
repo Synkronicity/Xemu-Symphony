@@ -133,6 +133,12 @@ static void emu_update_rn_multiple_wrap(dsp_core_t* dsp, uint32_t numreg, int32_
 
 static void emu_update_rn(dsp_core_t* dsp, uint32_t numreg, int32_t modifier)
 {
+    if (__builtin_expect((dsp->registers[DSP_REG_M0 + numreg] & 0x00FFFFFF) == 0x00FFFFFF, 1)) {
+        dsp->registers[DSP_REG_R0 + numreg] = 
+            (dsp->registers[DSP_REG_R0 + numreg] + (uint32_t)modifier) & BITMASK(24);
+        return;
+    }
+
     uint32_t m_low = dsp->registers[DSP_REG_M0+numreg] & 0xFFFF;
 
     if (m_low == 0xFFFF) {
@@ -175,12 +181,22 @@ static int emu_calc_ea(dsp_core_t* dsp, uint32_t ea_mode, uint32_t *dst_addr)
         case 2:
             /* (Rx)- */
             *dst_addr = dsp->registers[DSP_REG_R0+numreg] & BITMASK(24);
-            emu_update_rn(dsp, numreg, -1);
+            if (__builtin_expect((dsp->registers[DSP_REG_M0 + numreg] & 0x00FFFFFF) == 0x00FFFFFF, 1)) {
+                dsp->registers[DSP_REG_R0 + numreg] = 
+                    (dsp->registers[DSP_REG_R0 + numreg] - 1) & BITMASK(24);
+            } else {
+                emu_update_rn(dsp, numreg, -1);
+            }
             break;
         case 3:
             /* (Rx)+ */
             *dst_addr = dsp->registers[DSP_REG_R0+numreg] & BITMASK(24);
-            emu_update_rn(dsp, numreg, +1);
+            if (__builtin_expect((dsp->registers[DSP_REG_M0 + numreg] & 0x00FFFFFF) == 0x00FFFFFF, 1)) {
+                dsp->registers[DSP_REG_R0 + numreg] = 
+                    (dsp->registers[DSP_REG_R0 + numreg] + 1) & BITMASK(24);
+            } else {
+                emu_update_rn(dsp, numreg, +1);
+            }
             break;
         case 4:
             /* (Rx) */
@@ -5157,7 +5173,6 @@ static void emu_pm_8(dsp_core_t* dsp);
 static int emu_pm_read_accu24(dsp_core_t* dsp, int numreg, uint32_t *dest)
 {
     uint32_t scaling, value, reg;
-    int got_limited = 0;
 
     /* Read an accumulator, stores it limited */
 
@@ -5188,35 +5203,16 @@ static int emu_pm_read_accu24(dsp_core_t* dsp, int numreg, uint32_t *dest)
     /* limiting ? */
     value &= BITMASK(24);
 
-    if (dsp->registers[DSP_REG_A2+reg] == 0) {
-        if (value <= 0x007fffff) {
-            /* No limiting */
-            *dest=value;
-            return 0;
-        }
+    uint32_t a2 = dsp->registers[DSP_REG_A2 + reg];
+    if (__builtin_expect((a2 == 0 && value <= 0x007FFFFF) || 
+                         (a2 == 0xFF && value >= 0x00800000), 1)) {
+        *dest = value;
+        return 0;
     }
 
-    if (dsp->registers[DSP_REG_A2+reg] == 0xff) {
-        if (value >= 0x00800000) {
-            /* No limiting */
-            *dest=value;
-            return 0;
-        }
-    }
-
-    if (dsp->registers[DSP_REG_A2+reg] & (1<<7)) {
-        /* Limited to maximum negative value */
-        *dest=0x00800000;
-        dsp->registers[DSP_REG_SR] |= (1<<DSP_SR_L);
-        got_limited=1;
-    } else {
-        /* Limited to maximal positive value */
-        *dest=0x007fffff;
-        dsp->registers[DSP_REG_SR] |= (1<<DSP_SR_L);
-        got_limited=1;
-    }
-
-    return got_limited;
+    *dest = (a2 & 0x80) ? 0x00800000 : 0x007FFFFF;
+    dsp->registers[DSP_REG_SR] |= (1 << DSP_SR_L);
+    return 1;
 }
 
 static void emu_pm_0(dsp_core_t* dsp)
