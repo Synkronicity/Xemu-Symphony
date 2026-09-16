@@ -1,91 +1,13 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Created with Inkscape (http://www.inkscape.org/) -->
-
-<svg
-   xmlns:dc="http://purl.org/dc/elements/1.1/"
-   xmlns:cc="http://creativecommons.org/ns#"
-   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-   xmlns:svg="http://www.w3.org/2000/svg"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   width="512"
-   height="512"
-   viewBox="0 0 135.46666 135.46667"
-   version="1.1"
-   id="svg1668"
-   inkscape:version="0.92.3 (2405546, 2018-03-11)"
-   sodipodi:docname="xemu.svg"
-   inkscape:export-filename="/home/mborgerson/Desktop/xemu_work/logo.png"
-   inkscape:export-xdpi="96"
-   inkscape:export-ydpi="96">
-  <defs
-     id="defs1662" />
-  <sodipodi:namedview
-     id="base"
-     pagecolor="#ffffff"
-     bordercolor="#666666"
-     borderopacity="1.0"
-     inkscape:pageopacity="0"
-     inkscape:pageshadow="2"
-     inkscape:zoom="0.7"
-     inkscape:cx="362.99244"
-     inkscape:cy="434.86231"
-     inkscape:document-units="mm"
-     inkscape:current-layer="layer2"
-     showgrid="false"
-     units="px"
-     showguides="true"
-     inkscape:window-width="1920"
-     inkscape:window-height="1025"
-     inkscape:window-x="0"
-     inkscape:window-y="27"
-     inkscape:window-maximized="1"
-     inkscape:pagecheckerboard="true" />
-  <metadata
-     id="metadata1665">
-    <rdf:RDF>
-      <cc:Work
-         rdf:about="">
-        <dc:format>image/svg+xml</dc:format>
-        <dc:type
-           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
-        <dc:title></dc:title>
-      </cc:Work>
-    </rdf:RDF>
-  </metadata>
-  <g
-     inkscape:label="Layer 1"
-     inkscape:groupmode="layer"
-     id="layer1"
-     transform="translate(0,-161.53332)">
-    <g
-       inkscape:groupmode="layer"
-       id="layer2"
-       inkscape:label="Layer 2">
-      <circle
-         style="opacity:1;fill:#0f3612;fill-opacity:1;stroke:#81dc8a;stroke-width:0.59899998;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-         id="path2236"
-         cx="67.482391"
-         cy="229.55666"
-         r="63.5" />
-      <circle
-         style="opacity:1;fill:none;fill-opacity:1;stroke:#81dc8a;stroke-width:2.35041094;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-         id="path2234"
-         cx="67.482391"
-         cy="229.55666"
-         r="57.286186" />
-    </g>
-    <text
-       xml:space="preserve"
-       style="font-style:normal;font-weight:normal;font-size:63.40210342px;line-height:1.25;font-family:sans-serif;letter-spacing:0px;word-spacing:0px;display:inline;opacity:1;fill:#81dc8a;fill-opacity:1;stroke:#81dc8a;stroke-width:0.59907502;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;"
-       x="30.239998"
-       y="238.38223"
-       id="text879-9-3"><tspan
-         sodipodi:role="line"
-         id="tspan877-1-5"
-         x="30.239998"
-         y="238.38223"
-         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:38.04126358px;font-family:'ubuntu mono';-inkscape-font-specification:'ubuntu mono';fill:#81dc8a;fill-opacity:1;stroke:#81dc8a;stroke-width:0.59907502;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;">xemu</tspan></text>
-  </g>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 512 512">
+  <!-- Generator: Adobe Illustrator 30.8.1, SVG Export Plug-In . SVG Version: 2.1.4 Build 1)  -->
+  <path d="M255.77,484.23l-190.82-112.88.02-224.86L228.89,48.17l26.58-16.12,191.58,114.02-.02,224.69-191.25,113.47ZM323.38,113.67l-.05,81.42,94.21-.03v-7.03s-87.25-.07-87.25-.07l-.04-81.5-112.19.07-78.9,79.23-44.74.06.02,7.91,46.45-.03,80.04-80.11,102.45.08ZM229.19,132.94l79.41-.04.06,95.85-10.86,10.63-.06-94.13-64.05-.05-83.27,83.73-55.88.19c-.24,2.95-.45,5.29.4,8.47l56.09.19,85.29-85.51,54.52-.07.12,94.53-11.41,10.84-.11-93.07-39.41.28c-1.82.01-3.39,1.5-3.96,3.12-2.29,1.11-3.65,3.24-5.32,4.92l-65.92,65.94-12.27,12.32-58.11.04.02,8.63,83.21.04,68.41-68.57c2.89-.46,5.1-.65,7.85-.06l.04,121.66c1.46.66,4.56,1.17,5.83-.1l73.66-73.69,84.08-.07-.11-8.5h-85.11s-71.5,71.36-71.5,71.36l-.19-117.82-16.93-.22-68.88,68.96h-13.99s8.25-8.57,8.25-8.57l64.32-64.76,7.82-7.81,31.13-.06.34,103.53,57.88-58.02,86.79-.07.05-8.57-87.86.05-13.95,13.12-.09-95.78-88.53.09c-1.42,0-2.79.85-3.89,2.37l-78.93,78.97-49.65.05v8.34s52.93-.06,52.93-.06l72.37-72.61c3.49-3.5,7.05-6.01,9.35-10.02ZM363.65,296.64l-83.32,82.86-71.09-.1v-102.05s11.52-10.88,11.52-10.88l-.04,100.82,57.44-.02,84.11-84.18,55.3-.08-.13-8.52-80.38-.04-66.32,66.33-24.32-.08.07-11.9,22.1-.17,67.46-67.61,81.51-.02-.12-8.54-82.55.04-69.08,69.19-19.43-.1-.27-115.66-67.77,67.38-83.87-.05v8.48s85.3.01,85.3.01l59.52-59.36.18,125.64,34.17-.22,65.95-66.24,13.73.57-78.05,78.14-47.55-.03-.17-111.03-46.41,46.07-86.66-.02v8.42s88.24-.02,88.24-.02l19.53-19.12.07,101.94,81.14.1,81.85-81.55,52.26-.11-.08-8.58-53.82.28ZM417.38,326.98l.08-8.51h-49.27s-80.41,80.27-80.41,80.27h-93.46s-.05-81.57-.05-81.57l-99.75-.11c-.17,2.81-.36,4.94.2,7.26l92.6-.08v81.52s103.43,0,103.43,0l57.07-56.85,22.27-21.89,47.28-.03Z" fill="#121516"/>
+  <polygon points="363.65 296.64 417.47 296.36 417.55 304.94 365.29 305.05 283.45 386.6 202.31 386.5 202.24 284.56 182.71 303.67 94.47 303.7 94.47 295.27 181.13 295.29 227.53 249.22 227.71 360.25 275.26 360.28 353.3 282.14 339.57 281.57 273.62 347.81 239.45 348.02 239.28 222.39 179.76 281.75 94.46 281.73 94.46 273.25 178.33 273.31 246.1 205.93 246.37 321.58 265.81 321.68 334.89 252.49 417.45 252.45 417.56 260.99 336.05 261.01 268.59 328.63 246.49 328.8 246.42 340.7 270.74 340.78 337.06 274.44 417.44 274.48 417.57 283 362.27 283.08 278.17 367.26 220.72 367.28 220.76 266.47 209.26 277.34 209.24 379.39 280.34 379.5 363.65 296.64" fill="#07c73e"/>
+  <path d="M233.42,179.42c-1.61-2.12-2.59-4.13-2.66-6.61,1.68-1.68,3.04-3.8,5.32-4.92.92.29,2.03.24,2.85-.35s1.17-1.68,1.11-2.77l39.41-.28.11,93.07,11.41-10.84-.12-94.53-54.52.07-85.29,85.51-56.09-.19c-.85-3.18-.64-5.51-.4-8.47l55.88-.19,83.27-83.73,64.05.05.06,94.13,10.86-10.63-.06-95.85-79.41.04c-1.89-1.61-2.71-4.62-2.18-7.04l88.53-.09.09,95.78,13.95-13.12,87.86-.05-.05,8.57-86.79.07-57.88,58.02-.34-103.53-31.13.06-7.82,7.81Z" fill="#06cb40"/>
+  <path d="M164.84,238.75c1.26,2.14,2.16,4.17,4.26,5.43l-8.25,8.56h13.99s68.88-68.95,68.88-68.95l16.93.22.19,117.82,71.5-71.35h85.11s.11,8.49.11,8.49l-84.08.07-73.66,73.69c-1.27,1.27-4.37.76-5.83.1l-.04-121.66c-2.75-.59-4.96-.4-7.85.06l-68.41,68.57-83.21-.04-.02-8.63,58.11-.04,12.27-12.32Z" fill="#06c73e"/>
+  <polygon points="323.38 113.67 220.93 113.59 140.89 193.7 94.44 193.73 94.42 185.82 139.16 185.76 218.06 106.53 330.25 106.46 330.29 187.96 417.53 188.03 417.55 195.06 323.33 195.09 323.38 113.67" fill="#05c63e"/>
+  <path d="M417.38,326.98l-47.28.03-22.27,21.89-57.07,56.85h-103.44s0-81.52,0-81.52l-92.6.08c-.56-2.31-.38-4.45-.2-7.26l99.75.11.05,81.56h93.46s80.41-80.27,80.41-80.27h49.27s-.08,8.52-.08,8.52Z" fill="#08c93f"/>
+  <path d="M227.01,125.9c-.53,2.42.28,5.44,2.18,7.04-2.3,4.01-5.86,6.52-9.35,10.02l-72.37,72.61-52.92.06v-8.34s49.64-.05,49.64-.05l78.93-78.97c1.1-1.52,2.48-2.37,3.89-2.37Z" fill="#05ca3d"/>
+  <path d="M233.42,179.42l-64.32,64.76c-2.1-1.26-3-3.29-4.26-5.43l65.92-65.94c.07,2.48,1.05,4.5,2.66,6.61Z" fill="#04c63c"/>
+  <path d="M240.04,164.77c.05,1.09-.28,2.16-1.11,2.77s-1.93.64-2.85.35c.57-1.62,2.14-3.11,3.96-3.12Z" fill="#04c63c"/>
 </svg>
