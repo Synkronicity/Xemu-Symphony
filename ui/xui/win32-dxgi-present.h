@@ -35,6 +35,12 @@ extern "C" {
 bool win32_dxgi_present_init(SDL_Window *window);
 
 /**
+ * Enable DXGI presentation when vertical sync needs a non-blocking swap.
+ * A failed initialization is not retried until the setting is toggled.
+ */
+void win32_dxgi_present_set_enabled(SDL_Window *window, bool enabled);
+
+/**
  * Clean up all DXGI, D3D11, and WGL interop resources.
  */
 void win32_dxgi_present_cleanup(void);

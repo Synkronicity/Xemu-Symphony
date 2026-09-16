@@ -856,6 +856,8 @@ static void gl_render_frame(struct xemu_console *scon)
     }
 
 #ifdef _WIN32
+    win32_dxgi_present_set_enabled(scon->real_window,
+                                   g_config.display.window.vsync);
     if (win32_dxgi_present_is_active()) {
         win32_dxgi_present_begin_frame();
     }
@@ -889,7 +891,7 @@ static void gl_render_frame(struct xemu_console *scon)
         win32_dxgi_present_end_frame(g_config.display.window.vsync);
     } else {
         static bool warned = false;
-        if (!warned) {
+        if (g_config.display.window.vsync && !warned) {
             fprintf(stderr,
                     "win32_dxgi present failed or unavailable, falling back to "
                     "SDL_GL_SwapWindow\n");
@@ -1147,7 +1149,8 @@ static void display_early_init(DisplayOptions *o)
     SDL_GL_MakeCurrent(m_window, m_context);
     SDL_GL_SetSwapInterval(g_config.display.window.vsync ? 1 : 0);
 #ifdef _WIN32
-    win32_dxgi_present_init(m_window);
+    win32_dxgi_present_set_enabled(m_window,
+                                   g_config.display.window.vsync);
 #endif
     xemu_hud_init(m_window, m_context);
 }

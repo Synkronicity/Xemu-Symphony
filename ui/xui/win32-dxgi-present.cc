@@ -625,6 +625,7 @@ void Win32DxgiPresenter::Resize(int width, int height)
 }
 
 static Win32DxgiPresenter g_dxgi_presenter;
+static bool g_dxgi_present_requested;
 
 extern "C" {
 
@@ -633,8 +634,23 @@ bool win32_dxgi_present_init(SDL_Window *window)
     return g_dxgi_presenter.Init(window);
 }
 
+void win32_dxgi_present_set_enabled(SDL_Window *window, bool enabled)
+{
+    if (enabled == g_dxgi_present_requested) {
+        return;
+    }
+
+    g_dxgi_present_requested = enabled;
+    if (enabled) {
+        g_dxgi_presenter.Init(window);
+    } else {
+        g_dxgi_presenter.Cleanup();
+    }
+}
+
 void win32_dxgi_present_cleanup(void)
 {
+    g_dxgi_present_requested = false;
     g_dxgi_presenter.Cleanup();
 }
 
@@ -668,6 +684,11 @@ bool win32_dxgi_present_init(SDL_Window *window)
 {
     (void)window;
     return false;
+}
+void win32_dxgi_present_set_enabled(SDL_Window *window, bool enabled)
+{
+    (void)window;
+    (void)enabled;
 }
 void win32_dxgi_present_cleanup(void)
 {
