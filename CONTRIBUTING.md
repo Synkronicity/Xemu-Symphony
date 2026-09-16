@@ -1,6 +1,6 @@
-# Contributing to xemu-dsp56362
+# Contributing to Xemu Symphony
 
-`xemu-dsp56362` is an independent, sovereign downstream fork of Xemu dedicated to bit-accurate Low-Level Emulation (LLE) of the Motorola Symphony DSP56362 Encoding Processor (EP) and discrete 5.1 multi-channel audio preservation.
+`Xemu Symphony` is an independent, sovereign downstream fork of Xemu dedicated to bit-accurate Low-Level Emulation (LLE) of the Motorola Symphony DSP56362 Encoding Processor (EP) and discrete 5.1 multi-channel audio preservation.
 
 We welcome clean, well-tested contributions that advance hardware accuracy, audio fidelity, and platform portability.
 
