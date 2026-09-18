@@ -29,7 +29,7 @@
 
 using json = nlohmann::json;
 
-const char *releases_url = "https://api.github.com/repos/xemu-project/xemu/releases/latest";
+const char *releases_url = "https://api.github.com/repos/Synkronicityy/Xemu-Symphony/releases/continuous";
 
 #if defined(__x86_64__)
 #define PACKAGE_ARCH "x86_64"
