@@ -143,6 +143,7 @@ static void mcpx_aci_realize(PCIDevice *dev, Error **errp)
     MCPXACIState *d = MCPX_ACI_DEVICE(dev);
 
     dev->config[PCI_INTERRUPT_PIN] = 0x01;
+    pci_set_byte(dev->config + PCI_INTERRUPT_LINE, 6);
 
     memory_region_init(&d->mmio, OBJECT(dev), "mcpx-aci-mmio", 0x1000);
 

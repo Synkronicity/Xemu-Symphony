@@ -819,15 +819,20 @@ static void nabm_writeb(void *opaque, uint32_t addr, uint32_t val)
         r = &s->bm_regs[GET_BM(addr)];
         r->lvi = val % 32;
         if ((r->cr & CR_RPBM) && (r->sr & SR_DCH)) {
-            if (r->civ != r->lvi) {
-                r->sr &= ~(SR_DCH | SR_CELV);
-                if (r->picb == 0) {
+            r->sr &= ~(SR_DCH | SR_CELV);
+            if (r->picb == 0) {
+                if (r->civ == r->lvi) {
+                    /* Single-descriptor / same-index re-arm: re-fetch current descriptor */
+                    fetch_bd(s, r);
+                    r->piv = (r->civ + 1) % 32;
+                } else {
+                    /* Multi-descriptor advance: advance to prefetched descriptor */
                     r->civ = r->piv;
                     r->piv = (r->piv + 1) % 32;
                     fetch_bd(s, r);
                 }
-                update_sr(s, r, r->sr);
             }
+            update_sr(s, r, r->sr);
         }
         dolog("LVI[%d] <- 0x%x", GET_BM(addr), val);
         break;
@@ -844,10 +849,19 @@ static void nabm_writeb(void *opaque, uint32_t addr, uint32_t val)
                 voice_set_active(s, r - s->bm_regs, 0);
                 r->sr |= SR_DCH;
             } else {
-                r->civ = r->piv;
-                r->piv = (r->piv + 1) % 32;
-                fetch_bd(s, r);
-                r->sr &= ~SR_DCH;
+                if (r->sr & SR_DCH) {
+                    if (r->picb == 0) {
+                        if (r->civ == r->lvi) {
+                            fetch_bd(s, r);
+                            r->piv = (r->civ + 1) % 32;
+                        } else {
+                            r->civ = r->piv;
+                            r->piv = (r->piv + 1) % 32;
+                            fetch_bd(s, r);
+                        }
+                    }
+                    r->sr &= ~(SR_DCH | SR_CELV);
+                }
                 voice_set_active(s, r - s->bm_regs, 1);
             }
             update_sr(s, r, r->sr);
@@ -1053,7 +1067,7 @@ static void transfer_audio(AC97LinkState *s, int index, int elapsed)
         return;
     }
 
-    if (r->sr & SR_DCH) {
+    if ((r->sr & SR_DCH) && !r->picb) {
         if (r->cr & CR_RPBM) {
             switch (index) {
             case PO_INDEX:
@@ -1150,7 +1164,7 @@ static void po_callback(void *opaque, int free)
 void ac97_step_playback(AC97LinkState *s, int bytes)
 {
     AC97BusMasterRegs *r = &s->bm_regs[PO_INDEX];
-    if ((r->cr & CR_RPBM) && !(r->sr & SR_DCH)) {
+    if ((r->cr & CR_RPBM) && (!(r->sr & SR_DCH) || r->picb > 0)) {
         transfer_audio(s, PO_INDEX, bytes);
     }
 }
