@@ -190,7 +190,7 @@ The internal monitor stream outputs audio in standard discrete DirectSound 5.1 s
 ---
 
 ## Roadmap
-1.  **Beta 3 Release (Current):** Stabilize pure-C Motorola DSP56362 LLE execution across retail library titles.
+1.  **Beta 4 Release (Current):** Stabilize pure-C Motorola DSP56362 LLE execution across retail library titles.
     
 2.  **Dynamic Range Management:** Implement soft-knee saturation curves across multi-channel apertures to prevent clipping on aggressive 0 dBFS Bink cutscene audio.
     
