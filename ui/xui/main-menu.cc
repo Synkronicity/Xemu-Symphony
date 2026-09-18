@@ -850,10 +850,6 @@ void MainMenuAudioView::Draw()
              (int)(g_config.audio.volume_limit * 100));
     Slider("Output volume limit", &g_config.audio.volume_limit, buf);
 
-    SectionTitle("Quality");
-    Toggle("Real-time DSP processing", &g_config.audio.use_dsp,
-           "Enable improved audio accuracy (experimental)");
-
     SectionTitle("Firmware");
     FilePicker("DSP EP ROM", g_config.sys.files.ep_rom_path,
                rom_file_filters, 3, false, [](const char *path) {
