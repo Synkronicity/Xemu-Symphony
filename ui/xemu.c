@@ -890,14 +890,25 @@ static void gl_render_frame(struct xemu_console *scon)
     if (win32_dxgi_present_is_active()) {
         win32_dxgi_present_end_frame(g_config.display.window.vsync);
     } else {
-        static bool warned = false;
-        if (g_config.display.window.vsync && !warned) {
-            fprintf(stderr,
-                    "win32_dxgi present failed or unavailable, falling back to "
-                    "SDL_GL_SwapWindow\n");
-            warned = true;
+        /*
+         * OBS can inject its OpenGL hook after this frame began. Give the
+         * Windows presenter one last opportunity to switch to DXGI before
+         * entering a newly installed SwapBuffers hook. The transition frame
+         * was rendered to the default framebuffer, so leave it unpresented;
+         * the next frame will target the DXGI helper's render framebuffer.
+         */
+        win32_dxgi_present_set_enabled(scon->real_window,
+                                       g_config.display.window.vsync);
+        if (!win32_dxgi_present_is_active()) {
+            static bool warned = false;
+            if (g_config.display.window.vsync && !warned) {
+                fprintf(stderr,
+                        "win32_dxgi present failed or unavailable, falling "
+                        "back to SDL_GL_SwapWindow\n");
+                warned = true;
+            }
+            SDL_GL_SwapWindow(scon->real_window);
         }
-        SDL_GL_SwapWindow(scon->real_window);
     }
 #else
     SDL_GL_SwapWindow(scon->real_window);

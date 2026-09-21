@@ -35,8 +35,9 @@ extern "C" {
 bool win32_dxgi_present_init(SDL_Window *window);
 
 /**
- * Enable DXGI presentation when vertical sync needs a non-blocking swap.
- * A failed initialization is not retried until the setting is toggled.
+ * Update the requested DXGI presentation policy. On Windows, OBS capture
+ * compatibility can keep DXGI active even when vertical sync is disabled.
+ * A failed initialization is not retried until the request changes.
  */
 void win32_dxgi_present_set_enabled(SDL_Window *window, bool enabled);
 

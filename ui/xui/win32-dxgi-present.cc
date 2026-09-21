@@ -18,6 +18,7 @@
 //
 
 #include "win32-dxgi-present.h"
+#include "win32-dxgi-interop.h"
 
 #ifdef _WIN32
 
@@ -25,6 +26,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <tlhelp32.h>
 #include <d3d11.h>
 #include <dxgi1_4.h>
 #include <wrl/client.h>
@@ -101,10 +103,34 @@ public:
     void Resize(int width, int height);
 
 private:
+    struct InteropContext {
+        Win32DxgiPresenter *presenter;
+        bool vsync;
+        DWORD win_error = ERROR_SUCCESS;
+        GLenum gl_status = GL_FRAMEBUFFER_UNDEFINED;
+        GLenum gl_error = GL_NO_ERROR;
+        HRESULT dxgi_result = S_OK;
+        const char *dxgi_operation = nullptr;
+    };
+
+    struct ReleaseContext {
+        Win32DxgiPresenter *presenter;
+        DWORD win_error = ERROR_SUCCESS;
+    };
+
     bool LoadWglInteropFunctions();
     bool CreateSharedResources(int width, int height);
-    void ReleaseSharedResources();
+    bool ReleaseSharedResources();
     bool PerformResize(int width, int height);
+    static bool LockInteropObject(void *opaque);
+    static void CreateInteropFramebuffer(void *opaque);
+    static void BlitInteropObject(void *opaque);
+    static bool UnlockInteropObject(void *opaque);
+    static void NoopD3dAccess(void *opaque);
+    static void PresentInteropObject(void *opaque);
+    static bool UnregisterInteropObject(void *opaque);
+    static void DestroySharedResources(void *opaque);
+    void LogDxgiFailure(const char *operation, HRESULT result) const;
 
     static inline uint64_t PackDimensions(int width, int height)
     {
@@ -134,11 +160,13 @@ private:
 
     HANDLE m_wgl_device = nullptr;
     HANDLE m_wgl_object = nullptr;
+    XemuWin32DxgiInteropOwnership m_interop_ownership =
+        XEMU_WIN32_DXGI_INTEROP_UNLOCKED;
 
     GLuint m_render_tex = 0;
     GLuint m_render_fbo = 0;
 
-    GLuint m_interop_tex = 0;
+    GLuint m_interop_renderbuffer = 0;
     GLuint m_interop_fbo = 0;
 
     pfn_wgl_dx_open_device_nv m_wgl_dx_open_device_nv = nullptr;
@@ -172,35 +200,73 @@ bool Win32DxgiPresenter::LoadWglInteropFunctions()
            m_wgl_dx_lock_objects_nv && m_wgl_dx_unlock_objects_nv;
 }
 
-void Win32DxgiPresenter::ReleaseSharedResources()
+bool Win32DxgiPresenter::ReleaseSharedResources()
 {
+    /* Ensure a later SDL fallback frame targets the window framebuffer. */
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    if (m_render_fbo) {
-        glDeleteFramebuffers(1, &m_render_fbo);
-        m_render_fbo = 0;
+    ReleaseContext context = { this };
+    static const XemuWin32DxgiInteropReleaseOps release_ops = {
+        UnregisterInteropObject,
+        DestroySharedResources,
+    };
+    bool registered = m_wgl_device && m_wgl_object;
+    XemuWin32DxgiInteropReleaseResult result = xemu_win32_dxgi_interop_release(
+        &release_ops, &m_interop_ownership, registered, &context);
+    if (result == XEMU_WIN32_DXGI_INTEROP_OWNERSHIP_UNCERTAIN) {
+        fprintf(stderr, "win32_dxgi_present: shared resources quarantined; "
+                        "interop ownership is uncertain\n");
+        return false;
     }
-    if (m_render_tex) {
-        glDeleteTextures(1, &m_render_tex);
-        m_render_tex = 0;
+    if (result == XEMU_WIN32_DXGI_INTEROP_UNREGISTER_FAILED) {
+        fprintf(stderr,
+                "win32_dxgi_present: shared resources quarantined; "
+                "wglDXUnregisterObjectNV failed (WinError=0x%lX)\n",
+                static_cast<unsigned long>(context.win_error));
+        return false;
+    }
+    return true;
+}
+
+bool Win32DxgiPresenter::UnregisterInteropObject(void *opaque)
+{
+    ReleaseContext *context = static_cast<ReleaseContext *>(opaque);
+    Win32DxgiPresenter *presenter = context->presenter;
+    SetLastError(ERROR_SUCCESS);
+    if (!presenter->m_wgl_dx_unregister_object_nv(presenter->m_wgl_device,
+                                                  presenter->m_wgl_object)) {
+        context->win_error = GetLastError();
+        return false;
+    }
+    presenter->m_wgl_object = nullptr;
+    return true;
+}
+
+void Win32DxgiPresenter::DestroySharedResources(void *opaque)
+{
+    ReleaseContext *context = static_cast<ReleaseContext *>(opaque);
+    Win32DxgiPresenter *presenter = context->presenter;
+
+    if (presenter->m_render_fbo) {
+        glDeleteFramebuffers(1, &presenter->m_render_fbo);
+        presenter->m_render_fbo = 0;
+    }
+    if (presenter->m_render_tex) {
+        glDeleteTextures(1, &presenter->m_render_tex);
+        presenter->m_render_tex = 0;
     }
 
-    if (m_interop_fbo) {
-        glDeleteFramebuffers(1, &m_interop_fbo);
-        m_interop_fbo = 0;
+    if (presenter->m_interop_fbo) {
+        glDeleteFramebuffers(1, &presenter->m_interop_fbo);
+        presenter->m_interop_fbo = 0;
     }
 
-    if (m_wgl_device && m_wgl_object) {
-        m_wgl_dx_unregister_object_nv(m_wgl_device, m_wgl_object);
-        m_wgl_object = nullptr;
+    if (presenter->m_interop_renderbuffer) {
+        glDeleteRenderbuffers(1, &presenter->m_interop_renderbuffer);
+        presenter->m_interop_renderbuffer = 0;
     }
 
-    if (m_interop_tex) {
-        glDeleteTextures(1, &m_interop_tex);
-        m_interop_tex = 0;
-    }
-
-    m_shared_texture.Reset();
+    presenter->m_shared_texture.Reset();
 }
 
 bool Win32DxgiPresenter::CreateSharedResources(int width, int height)
@@ -209,7 +275,9 @@ bool Win32DxgiPresenter::CreateSharedResources(int width, int height)
         return false;
     }
 
-    ReleaseSharedResources();
+    if (!ReleaseSharedResources()) {
+        return false;
+    }
 
     auto create_texture = [](GLuint &texture) {
         glGenTextures(1, &texture);
@@ -270,25 +338,57 @@ bool Win32DxgiPresenter::CreateSharedResources(int width, int height)
         return false;
     }
 
-    create_texture(m_interop_tex);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    glGenRenderbuffers(1, &m_interop_renderbuffer);
 
     m_wgl_object = m_wgl_dx_register_object_nv(
-        m_wgl_device, m_shared_texture.Get(), m_interop_tex, GL_TEXTURE_2D,
+        m_wgl_device, m_shared_texture.Get(), m_interop_renderbuffer,
+        GL_RENDERBUFFER,
         WGL_ACCESS_READ_WRITE_NV);
     if (!m_wgl_object) {
+        DWORD error = GetLastError();
         fprintf(stderr,
                 "win32_dxgi_present: wglDXRegisterObjectNV failed (GLError=%u, "
                 "WinError=0x%X)\n",
-                glGetError(), static_cast<unsigned int>(GetLastError()));
+                glGetError(), static_cast<unsigned int>(error));
         ReleaseSharedResources();
         return false;
     }
 
-    if (!create_fbo(m_interop_fbo, m_interop_tex)) {
+    InteropContext context = { this, false };
+    static const XemuWin32DxgiInteropOps interop_ops = {
+        LockInteropObject,
+        CreateInteropFramebuffer,
+        UnlockInteropObject,
+        NoopD3dAccess,
+    };
+    XemuWin32DxgiInteropResult result = xemu_win32_dxgi_interop_transfer(
+        &interop_ops, &m_interop_ownership, &context);
+    if (result == XEMU_WIN32_DXGI_INTEROP_LOCK_FAILED) {
+        fprintf(stderr,
+                "win32_dxgi_present: wglDXLockObjectsNV failed during "
+                "initialization (WinError=0x%lX)\n",
+                static_cast<unsigned long>(context.win_error));
+        ReleaseSharedResources();
         return false;
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (result == XEMU_WIN32_DXGI_INTEROP_UNLOCK_FAILED) {
+        fprintf(stderr,
+                "win32_dxgi_present: wglDXUnlockObjectsNV failed during "
+                "initialization (WinError=0x%lX); resources quarantined\n",
+                static_cast<unsigned long>(context.win_error));
+        return false;
+    }
+    if (result != XEMU_WIN32_DXGI_INTEROP_TRANSFERRED) {
+        return false;
+    }
+    if (context.gl_status != GL_FRAMEBUFFER_COMPLETE) {
+        fprintf(stderr,
+                "win32_dxgi_present: interop FBO incomplete (status=0x%X, "
+                "GLError=%u, w=%d, h=%d)\n",
+                context.gl_status, context.gl_error, width, height);
+        ReleaseSharedResources();
+        return false;
+    }
 
     m_width = width;
     m_height = height;
@@ -304,7 +404,10 @@ bool Win32DxgiPresenter::PerformResize(int width, int height)
         return true;
     }
 
-    ReleaseSharedResources();
+    if (!ReleaseSharedResources()) {
+        m_active.store(false, std::memory_order_release);
+        return false;
+    }
 
     if (m_d3d_context) {
         m_d3d_context->ClearState();
@@ -338,6 +441,11 @@ bool Win32DxgiPresenter::Init(SDL_Window *window)
 {
     if (m_active.load(std::memory_order_acquire)) {
         return true;
+    }
+    if (m_interop_ownership != XEMU_WIN32_DXGI_INTEROP_UNLOCKED) {
+        fprintf(stderr, "win32_dxgi_present: initialization blocked; shared "
+                        "resources remain quarantined\n");
+        return false;
     }
 
     m_window = window;
@@ -520,7 +628,9 @@ void Win32DxgiPresenter::Cleanup()
 {
     m_active.store(false, std::memory_order_release);
     m_pending_size.store(0, std::memory_order_release);
-    ReleaseSharedResources();
+    if (!ReleaseSharedResources()) {
+        return;
+    }
 
     if (m_d3d_context) {
         m_d3d_context->ClearState();
@@ -529,7 +639,13 @@ void Win32DxgiPresenter::Cleanup()
 
     if (m_wgl_device) {
         if (m_wgl_dx_close_device_nv) {
-            m_wgl_dx_close_device_nv(m_wgl_device);
+            if (!m_wgl_dx_close_device_nv(m_wgl_device)) {
+                DWORD error = GetLastError();
+                fprintf(stderr,
+                        "win32_dxgi_present: wglDXCloseDeviceNV failed "
+                        "(WinError=0x%lX)\n",
+                        static_cast<unsigned long>(error));
+            }
         }
         m_wgl_device = nullptr;
     }
@@ -567,6 +683,110 @@ void Win32DxgiPresenter::BeginFrame()
     glViewport(0, 0, m_width, m_height);
 }
 
+bool Win32DxgiPresenter::LockInteropObject(void *opaque)
+{
+    InteropContext *context = static_cast<InteropContext *>(opaque);
+    Win32DxgiPresenter *presenter = context->presenter;
+    SetLastError(ERROR_SUCCESS);
+    if (!presenter->m_wgl_dx_lock_objects_nv(presenter->m_wgl_device, 1,
+                                             &presenter->m_wgl_object)) {
+        context->win_error = GetLastError();
+        return false;
+    }
+    return true;
+}
+
+void Win32DxgiPresenter::CreateInteropFramebuffer(void *opaque)
+{
+    InteropContext *context = static_cast<InteropContext *>(opaque);
+    Win32DxgiPresenter *presenter = context->presenter;
+
+    glGenFramebuffers(1, &presenter->m_interop_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, presenter->m_interop_fbo);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                              GL_RENDERBUFFER,
+                              presenter->m_interop_renderbuffer);
+    context->gl_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    context->gl_error = glGetError();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void Win32DxgiPresenter::BlitInteropObject(void *opaque)
+{
+    InteropContext *context = static_cast<InteropContext *>(opaque);
+    Win32DxgiPresenter *presenter = context->presenter;
+
+    /* Convert OpenGL Y-up to the D3D11 texture's Y-down orientation. */
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, presenter->m_render_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, presenter->m_interop_fbo);
+    glBlitFramebuffer(0, 0, presenter->m_width, presenter->m_height, 0,
+                      presenter->m_height, presenter->m_width, 0,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+bool Win32DxgiPresenter::UnlockInteropObject(void *opaque)
+{
+    InteropContext *context = static_cast<InteropContext *>(opaque);
+    Win32DxgiPresenter *presenter = context->presenter;
+    SetLastError(ERROR_SUCCESS);
+    if (!presenter->m_wgl_dx_unlock_objects_nv(presenter->m_wgl_device, 1,
+                                               &presenter->m_wgl_object)) {
+        context->win_error = GetLastError();
+        return false;
+    }
+    return true;
+}
+
+void Win32DxgiPresenter::NoopD3dAccess(void *opaque)
+{
+    (void)opaque;
+}
+
+void Win32DxgiPresenter::PresentInteropObject(void *opaque)
+{
+    InteropContext *context = static_cast<InteropContext *>(opaque);
+    Win32DxgiPresenter *presenter = context->presenter;
+    ComPtr<ID3D11Texture2D> back_buffer;
+
+    context->dxgi_operation = "GetBuffer";
+    context->dxgi_result =
+        presenter->m_swap_chain->GetBuffer(0, IID_PPV_ARGS(&back_buffer));
+    if (FAILED(context->dxgi_result)) {
+        return;
+    }
+
+    presenter->m_d3d_context->CopyResource(back_buffer.Get(),
+                                           presenter->m_shared_texture.Get());
+
+    UINT sync_interval = context->vsync ? 1 : 0;
+    UINT present_flags = (!context->vsync && presenter->m_allow_tearing) ?
+                             DXGI_PRESENT_ALLOW_TEARING :
+                             0;
+    context->dxgi_operation = "Present";
+    context->dxgi_result =
+        presenter->m_swap_chain->Present(sync_interval, present_flags);
+}
+
+void Win32DxgiPresenter::LogDxgiFailure(const char *operation,
+                                        HRESULT result) const
+{
+    if (m_d3d_device && (result == DXGI_ERROR_DEVICE_REMOVED ||
+                         result == DXGI_ERROR_DEVICE_RESET ||
+                         result == DXGI_ERROR_DRIVER_INTERNAL_ERROR)) {
+        HRESULT reason = m_d3d_device->GetDeviceRemovedReason();
+        fprintf(stderr,
+                "Win32DxgiPresenter::EndFrame: %s failed (hr=0x%08lX, "
+                "device_reason=0x%08lX)\n",
+                operation, static_cast<unsigned long>(result),
+                static_cast<unsigned long>(reason));
+        return;
+    }
+
+    fprintf(stderr, "Win32DxgiPresenter::EndFrame: %s failed (hr=0x%08lX)\n",
+            operation, static_cast<unsigned long>(result));
+}
+
 void Win32DxgiPresenter::EndFrame(bool vsync)
 {
     if (!m_active.load(std::memory_order_acquire) || !m_wgl_object ||
@@ -574,41 +794,40 @@ void Win32DxgiPresenter::EndFrame(bool vsync)
         return;
     }
 
-    if (!m_wgl_dx_lock_objects_nv(m_wgl_device, 1, &m_wgl_object)) {
+    InteropContext context = { this, vsync };
+    static const XemuWin32DxgiInteropOps interop_ops = {
+        LockInteropObject,
+        BlitInteropObject,
+        UnlockInteropObject,
+        PresentInteropObject,
+    };
+
+    XemuWin32DxgiInteropResult result = xemu_win32_dxgi_interop_transfer(
+        &interop_ops, &m_interop_ownership, &context);
+    if (result == XEMU_WIN32_DXGI_INTEROP_NOT_READY) {
+        m_active.store(false, std::memory_order_release);
+        return;
+    }
+    if (result == XEMU_WIN32_DXGI_INTEROP_LOCK_FAILED) {
         fprintf(stderr,
                 "Win32DxgiPresenter::EndFrame: wglDXLockObjectsNV failed "
-                "(WinError=0x%X)\n",
-                static_cast<unsigned int>(GetLastError()));
+                "(WinError=0x%lX)\n",
+                static_cast<unsigned long>(context.win_error));
         Cleanup();
         return;
     }
-    m_wgl_dx_lock_objects_nv(m_wgl_device, 1, &m_wgl_object);
-
-    // Blit from render FBO to interop FBO with vertical flip to convert OpenGL
-    // (Y-up) to D3D11 (Y-down)
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_render_fbo);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_interop_fbo);
-    glBlitFramebuffer(0, 0, m_width, m_height, 0, m_height, m_width, 0,
-                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    m_wgl_dx_unlock_objects_nv(m_wgl_device, 1, &m_wgl_object);
-
-    ComPtr<ID3D11Texture2D> back_buffer;
-    HRESULT res = m_swap_chain->GetBuffer(0, IID_PPV_ARGS(&back_buffer));
-    if (SUCCEEDED(res)) {
-        m_d3d_context->CopyResource(back_buffer.Get(), m_shared_texture.Get());
+    if (result == XEMU_WIN32_DXGI_INTEROP_UNLOCK_FAILED) {
+        fprintf(stderr,
+                "Win32DxgiPresenter::EndFrame: wglDXUnlockObjectsNV failed "
+                "(WinError=0x%lX); skipping DirectX access\n",
+                static_cast<unsigned long>(context.win_error));
+        m_active.store(false, std::memory_order_release);
+        m_pending_size.store(0, std::memory_order_release);
+        return;
     }
 
-    UINT sync_interval = vsync ? 1 : 0;
-    UINT present_flags =
-        (!vsync && m_allow_tearing) ? DXGI_PRESENT_ALLOW_TEARING : 0;
-
-    res = m_swap_chain->Present(sync_interval, present_flags);
-    if (FAILED(res)) {
-        fprintf(stderr,
-                "Win32DxgiPresenter::EndFrame: Present failed (hr=0x%08lX)\n",
-                (unsigned long)res);
+    if (FAILED(context.dxgi_result)) {
+        LogDxgiFailure(context.dxgi_operation, context.dxgi_result);
         Cleanup();
     }
 }
@@ -626,6 +845,51 @@ void Win32DxgiPresenter::Resize(int width, int height)
 
 static Win32DxgiPresenter g_dxgi_presenter;
 static bool g_dxgi_present_requested;
+static bool g_obs_process_checked;
+static bool g_obs_capture_compatibility;
+
+static bool IsObsRunning()
+{
+    HANDLE snapshot =
+        CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    PROCESSENTRY32W process = {};
+    process.dwSize = sizeof(process);
+    bool found = false;
+    if (Process32FirstW(snapshot, &process)) {
+        do {
+            if (CompareStringOrdinal(process.szExeFile, -1, L"obs64.exe", -1,
+                                     TRUE) == CSTR_EQUAL) {
+                found = true;
+                break;
+            }
+        } while (Process32NextW(snapshot, &process));
+    }
+    CloseHandle(snapshot);
+    return found;
+}
+
+static bool CaptureCompatibilityRequested()
+{
+    if (g_obs_capture_compatibility) {
+        return true;
+    }
+
+    if (GetModuleHandleW(L"graphics-hook64.dll")) {
+        g_obs_capture_compatibility = true;
+        return true;
+    }
+
+    /* Avoid process enumeration in the per-frame policy update. */
+    if (!g_obs_process_checked) {
+        g_obs_process_checked = true;
+        g_obs_capture_compatibility = IsObsRunning();
+    }
+    return g_obs_capture_compatibility;
+}
 
 extern "C" {
 
@@ -636,6 +900,7 @@ bool win32_dxgi_present_init(SDL_Window *window)
 
 void win32_dxgi_present_set_enabled(SDL_Window *window, bool enabled)
 {
+    enabled = enabled || CaptureCompatibilityRequested();
     if (enabled == g_dxgi_present_requested) {
         return;
     }
