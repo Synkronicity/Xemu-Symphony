@@ -829,6 +829,9 @@ static void gl_render_frame(struct xemu_console *scon)
 
     bool flip_required = false;
     bool release_surface_texture = false;
+#ifdef _WIN32
+    XemuWin32PresentRoute present_route;
+#endif
 
     /* XXX: Note that this bypasses the usual VGA path in order to quickly
      * get the surface. This is simple and fast, at the cost of accuracy.
@@ -856,11 +859,8 @@ static void gl_render_frame(struct xemu_console *scon)
     }
 
 #ifdef _WIN32
-    win32_dxgi_present_set_enabled(scon->real_window,
-                                   g_config.display.window.vsync);
-    if (win32_dxgi_present_is_active()) {
-        win32_dxgi_present_begin_frame();
-    }
+    present_route = win32_dxgi_present_prepare_frame(
+        scon->real_window, g_config.display.window.vsync);
 #endif
 
     glClearColor(0, 0, 0, 0);
@@ -887,28 +887,10 @@ static void gl_render_frame(struct xemu_console *scon)
     nv2a_release_framebuffer_surface();
 
 #ifdef _WIN32
-    if (win32_dxgi_present_is_active()) {
-        win32_dxgi_present_end_frame(g_config.display.window.vsync);
-    } else {
-        /*
-         * OBS can inject its OpenGL hook after this frame began. Give the
-         * Windows presenter one last opportunity to switch to DXGI before
-         * entering a newly installed SwapBuffers hook. The transition frame
-         * was rendered to the default framebuffer, so leave it unpresented;
-         * the next frame will target the DXGI helper's render framebuffer.
-         */
-        win32_dxgi_present_set_enabled(scon->real_window,
-                                       g_config.display.window.vsync);
-        if (!win32_dxgi_present_is_active()) {
-            static bool warned = false;
-            if (g_config.display.window.vsync && !warned) {
-                fprintf(stderr,
-                        "win32_dxgi present failed or unavailable, falling "
-                        "back to SDL_GL_SwapWindow\n");
-                warned = true;
-            }
-            SDL_GL_SwapWindow(scon->real_window);
-        }
+    present_route = win32_dxgi_present_finish_frame(
+        scon->real_window, present_route, g_config.display.window.vsync);
+    if (present_route == XEMU_WIN32_PRESENT_SDL) {
+        SDL_GL_SwapWindow(scon->real_window);
     }
 #else
     SDL_GL_SwapWindow(scon->real_window);
@@ -1159,10 +1141,6 @@ static void display_early_init(DisplayOptions *o)
 
     SDL_GL_MakeCurrent(m_window, m_context);
     SDL_GL_SetSwapInterval(g_config.display.window.vsync ? 1 : 0);
-#ifdef _WIN32
-    win32_dxgi_present_set_enabled(m_window,
-                                   g_config.display.window.vsync);
-#endif
     xemu_hud_init(m_window, m_context);
 }
 

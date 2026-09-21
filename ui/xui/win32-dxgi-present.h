@@ -23,23 +23,19 @@
 #include <SDL3/SDL.h>
 #include <stdbool.h>
 
+#include "win32-dxgi-present-state.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- * Initialize DXGI SwapChain and WGL_NV_DX_interop on Windows.
- * Returns true if DXGI presentation is active and ready to use, false
- * otherwise.
- */
-bool win32_dxgi_present_init(SDL_Window *window);
+/** Select and begin the presentation route for one complete UI frame. */
+XemuWin32PresentRoute win32_dxgi_present_prepare_frame(SDL_Window *window,
+                                                       bool vsync);
 
-/**
- * Update the requested DXGI presentation policy. On Windows, OBS capture
- * compatibility can keep DXGI active even when vertical sync is disabled.
- * A failed initialization is not retried until the request changes.
- */
-void win32_dxgi_present_set_enabled(SDL_Window *window, bool enabled);
+/** Complete the same frame route, including the late-hook safety check. */
+XemuWin32PresentRoute win32_dxgi_present_finish_frame(
+    SDL_Window *window, XemuWin32PresentRoute route, bool vsync);
 
 /**
  * Clean up all DXGI, D3D11, and WGL interop resources.
@@ -51,20 +47,7 @@ void win32_dxgi_present_cleanup(void);
  */
 bool win32_dxgi_present_is_active(void);
 
-/**
- * Call before rendering the UI frame. Binds the DXGI interop FBO.
- */
-void win32_dxgi_present_begin_frame(void);
-
-/**
- * Call after rendering the UI frame. Unbinds FBO, copies to swapchain, and
- * presents.
- */
-void win32_dxgi_present_end_frame(bool vsync);
-
-/**
- * Notify the presentation helper that the window size has changed.
- */
+/** Notify the presentation helper that the window size has changed. */
 void win32_dxgi_present_resize(int width, int height);
 
 #ifdef __cplusplus

@@ -87,19 +87,22 @@ class Win32DxgiPresenter {
 public:
     Win32DxgiPresenter() = default;
 
-    ~Win32DxgiPresenter()
-    {
-        Cleanup();
-    }
+    /* GL/WGL shutdown is explicit while the display context is current. */
+    ~Win32DxgiPresenter() = default;
 
     bool Init(SDL_Window *window);
-    void Cleanup();
+    bool ShutdownWithCurrentContext();
     bool IsActive() const
     {
         return m_active.load(std::memory_order_acquire);
     }
-    void BeginFrame();
-    void EndFrame(bool vsync);
+    bool IsQuarantined() const
+    {
+        return m_permanently_unusable ||
+               m_interop_ownership == XEMU_WIN32_DXGI_INTEROP_QUARANTINED;
+    }
+    bool BeginFrame();
+    bool EndFrame(bool vsync);
     void Resize(int width, int height);
 
 private:
@@ -130,6 +133,10 @@ private:
     static void PresentInteropObject(void *opaque);
     static bool UnregisterInteropObject(void *opaque);
     static void DestroySharedResources(void *opaque);
+    static bool CloseInteropDevice(void *opaque);
+    static void ReleaseOwners(void *opaque);
+    static void AbandonOwners(void *opaque);
+    void QuarantineOwners();
     void LogDxgiFailure(const char *operation, HRESULT result) const;
 
     static inline uint64_t PackDimensions(int width, int height)
@@ -162,6 +169,7 @@ private:
     HANDLE m_wgl_object = nullptr;
     XemuWin32DxgiInteropOwnership m_interop_ownership =
         XEMU_WIN32_DXGI_INTEROP_UNLOCKED;
+    bool m_permanently_unusable = false;
 
     GLuint m_render_tex = 0;
     GLuint m_render_fbo = 0;
@@ -216,6 +224,7 @@ bool Win32DxgiPresenter::ReleaseSharedResources()
     if (result == XEMU_WIN32_DXGI_INTEROP_OWNERSHIP_UNCERTAIN) {
         fprintf(stderr, "win32_dxgi_present: shared resources quarantined; "
                         "interop ownership is uncertain\n");
+        QuarantineOwners();
         return false;
     }
     if (result == XEMU_WIN32_DXGI_INTEROP_UNREGISTER_FAILED) {
@@ -223,6 +232,7 @@ bool Win32DxgiPresenter::ReleaseSharedResources()
                 "win32_dxgi_present: shared resources quarantined; "
                 "wglDXUnregisterObjectNV failed (WinError=0x%lX)\n",
                 static_cast<unsigned long>(context.win_error));
+        QuarantineOwners();
         return false;
     }
     return true;
@@ -267,6 +277,64 @@ void Win32DxgiPresenter::DestroySharedResources(void *opaque)
     }
 
     presenter->m_shared_texture.Reset();
+}
+
+bool Win32DxgiPresenter::CloseInteropDevice(void *opaque)
+{
+    ReleaseContext *context = static_cast<ReleaseContext *>(opaque);
+    Win32DxgiPresenter *presenter = context->presenter;
+
+    if (!presenter->m_wgl_device) {
+        return true;
+    }
+    if (!presenter->m_wgl_dx_close_device_nv) {
+        context->win_error = ERROR_PROC_NOT_FOUND;
+        return false;
+    }
+
+    SetLastError(ERROR_SUCCESS);
+    if (!presenter->m_wgl_dx_close_device_nv(presenter->m_wgl_device)) {
+        context->win_error = GetLastError();
+        return false;
+    }
+    presenter->m_wgl_device = nullptr;
+    return true;
+}
+
+void Win32DxgiPresenter::ReleaseOwners(void *opaque)
+{
+    ReleaseContext *context = static_cast<ReleaseContext *>(opaque);
+    Win32DxgiPresenter *presenter = context->presenter;
+
+    presenter->m_shared_texture.Reset();
+    presenter->m_swap_chain.Reset();
+    presenter->m_d3d_context.Reset();
+    presenter->m_d3d_device.Reset();
+}
+
+void Win32DxgiPresenter::AbandonOwners(void *opaque)
+{
+    ReleaseContext *context = static_cast<ReleaseContext *>(opaque);
+    Win32DxgiPresenter *presenter = context->presenter;
+
+    /*
+     * Ownership is uncertain. Intentionally retain the driver-owned objects
+     * until process exit rather than release objects that WGL may still use.
+     */
+    (void)presenter->m_shared_texture.Detach();
+    (void)presenter->m_swap_chain.Detach();
+    (void)presenter->m_d3d_context.Detach();
+    (void)presenter->m_d3d_device.Detach();
+}
+
+void Win32DxgiPresenter::QuarantineOwners()
+{
+    m_active.store(false, std::memory_order_release);
+    m_pending_size.store(0, std::memory_order_release);
+    m_interop_ownership = XEMU_WIN32_DXGI_INTEROP_QUARANTINED;
+    m_permanently_unusable = true;
+    ReleaseContext context = { this };
+    AbandonOwners(&context);
 }
 
 bool Win32DxgiPresenter::CreateSharedResources(int width, int height)
@@ -376,6 +444,7 @@ bool Win32DxgiPresenter::CreateSharedResources(int width, int height)
                 "win32_dxgi_present: wglDXUnlockObjectsNV failed during "
                 "initialization (WinError=0x%lX); resources quarantined\n",
                 static_cast<unsigned long>(context.win_error));
+        QuarantineOwners();
         return false;
     }
     if (result != XEMU_WIN32_DXGI_INTEROP_TRANSFERRED) {
@@ -423,14 +492,14 @@ bool Win32DxgiPresenter::PerformResize(int width, int height)
                 "win32_dxgi_present: ResizeBuffers failed (hr=0x%08lX, w=%d, "
                 "h=%d, flags=0x%X)\n",
                 (unsigned long)res, width, height, flags);
-        Cleanup();
+        ShutdownWithCurrentContext();
         return false;
     }
 
     if (!CreateSharedResources(width, height)) {
         fprintf(stderr, "win32_dxgi_present: Failed to recreate shared "
                         "resources after resize\n");
-        Cleanup();
+        ShutdownWithCurrentContext();
         return false;
     }
 
@@ -442,7 +511,8 @@ bool Win32DxgiPresenter::Init(SDL_Window *window)
     if (m_active.load(std::memory_order_acquire)) {
         return true;
     }
-    if (m_interop_ownership != XEMU_WIN32_DXGI_INTEROP_UNLOCKED) {
+    if (m_permanently_unusable ||
+        m_interop_ownership != XEMU_WIN32_DXGI_INTEROP_UNLOCKED) {
         fprintf(stderr, "win32_dxgi_present: initialization blocked; shared "
                         "resources remain quarantined\n");
         return false;
@@ -591,7 +661,7 @@ bool Win32DxgiPresenter::Init(SDL_Window *window)
                     "win32_dxgi_present: CreateSwapChainForHwnd failed "
                     "(hr=0x%08lX)\n",
                     (unsigned long)res);
-            Cleanup();
+            ShutdownWithCurrentContext();
             return false;
         }
     }
@@ -604,12 +674,12 @@ bool Win32DxgiPresenter::Init(SDL_Window *window)
                 "win32_dxgi_present: wglDXOpenDeviceNV failed (GLError=%u, "
                 "WinError=0x%X)\n",
                 glGetError(), static_cast<unsigned int>(GetLastError()));
-        Cleanup();
+        ShutdownWithCurrentContext();
         return false;
     }
 
     if (!CreateSharedResources(width, height)) {
-        Cleanup();
+        ShutdownWithCurrentContext();
         return false;
     }
 
@@ -624,12 +694,15 @@ bool Win32DxgiPresenter::Init(SDL_Window *window)
     return true;
 }
 
-void Win32DxgiPresenter::Cleanup()
+bool Win32DxgiPresenter::ShutdownWithCurrentContext()
 {
     m_active.store(false, std::memory_order_release);
     m_pending_size.store(0, std::memory_order_release);
-    if (!ReleaseSharedResources()) {
-        return;
+
+    if (m_permanently_unusable ||
+        m_interop_ownership != XEMU_WIN32_DXGI_INTEROP_UNLOCKED) {
+        QuarantineOwners();
+        return false;
     }
 
     if (m_d3d_context) {
@@ -637,31 +710,51 @@ void Win32DxgiPresenter::Cleanup()
         m_d3d_context->Flush();
     }
 
-    if (m_wgl_device) {
-        if (m_wgl_dx_close_device_nv) {
-            if (!m_wgl_dx_close_device_nv(m_wgl_device)) {
-                DWORD error = GetLastError();
-                fprintf(stderr,
-                        "win32_dxgi_present: wglDXCloseDeviceNV failed "
-                        "(WinError=0x%lX)\n",
-                        static_cast<unsigned long>(error));
-            }
+    ReleaseContext context = { this };
+    static const XemuWin32DxgiInteropShutdownOps shutdown_ops = {
+        UnregisterInteropObject,
+        DestroySharedResources,
+        CloseInteropDevice,
+        ReleaseOwners,
+        AbandonOwners,
+    };
+    bool registered = m_wgl_device && m_wgl_object;
+    XemuWin32DxgiInteropShutdownResult result =
+        xemu_win32_dxgi_interop_shutdown(
+            &shutdown_ops, &m_interop_ownership, registered,
+            m_wgl_device != nullptr, &context);
+
+    if (result != XEMU_WIN32_DXGI_INTEROP_SHUTDOWN_COMPLETE) {
+        m_permanently_unusable = true;
+        if (result == XEMU_WIN32_DXGI_INTEROP_SHUTDOWN_UNREGISTER_FAILED) {
+            fprintf(stderr,
+                    "win32_dxgi_present: shutdown quarantined; "
+                    "wglDXUnregisterObjectNV failed (WinError=0x%lX)\n",
+                    static_cast<unsigned long>(context.win_error));
+        } else if (result == XEMU_WIN32_DXGI_INTEROP_SHUTDOWN_CLOSE_FAILED) {
+            fprintf(stderr,
+                    "win32_dxgi_present: shutdown quarantined; "
+                    "wglDXCloseDeviceNV failed (WinError=0x%lX)\n",
+                    static_cast<unsigned long>(context.win_error));
+        } else {
+            fprintf(stderr,
+                    "win32_dxgi_present: shutdown quarantined; interop "
+                    "ownership is uncertain\n");
         }
-        m_wgl_device = nullptr;
+        return false;
     }
 
-    m_swap_chain.Reset();
-    m_d3d_context.Reset();
-    m_d3d_device.Reset();
     m_window = nullptr;
     m_width = 0;
     m_height = 0;
+    return true;
 }
 
-void Win32DxgiPresenter::BeginFrame()
+bool Win32DxgiPresenter::BeginFrame()
 {
     if (!m_active.load(std::memory_order_acquire)) {
-        return;
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return false;
     }
 
     uint64_t packed_size =
@@ -671,16 +764,23 @@ void Win32DxgiPresenter::BeginFrame()
         int target_height = 0;
         UnpackDimensions(packed_size, target_width, target_height);
         if (target_width > 0 && target_height > 0) {
-            PerformResize(target_width, target_height);
+            if (!PerformResize(target_width, target_height)) {
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                return false;
+            }
         }
     }
 
-    if (!m_render_fbo) {
-        return;
+    if (!m_active.load(std::memory_order_acquire) ||
+        m_interop_ownership != XEMU_WIN32_DXGI_INTEROP_UNLOCKED ||
+        !m_render_fbo) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return false;
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_render_fbo);
     glViewport(0, 0, m_width, m_height);
+    return true;
 }
 
 bool Win32DxgiPresenter::LockInteropObject(void *opaque)
@@ -787,11 +887,11 @@ void Win32DxgiPresenter::LogDxgiFailure(const char *operation,
             operation, static_cast<unsigned long>(result));
 }
 
-void Win32DxgiPresenter::EndFrame(bool vsync)
+bool Win32DxgiPresenter::EndFrame(bool vsync)
 {
     if (!m_active.load(std::memory_order_acquire) || !m_wgl_object ||
         !m_render_fbo || !m_interop_fbo) {
-        return;
+        return false;
     }
 
     InteropContext context = { this, vsync };
@@ -806,15 +906,15 @@ void Win32DxgiPresenter::EndFrame(bool vsync)
         &interop_ops, &m_interop_ownership, &context);
     if (result == XEMU_WIN32_DXGI_INTEROP_NOT_READY) {
         m_active.store(false, std::memory_order_release);
-        return;
+        return false;
     }
     if (result == XEMU_WIN32_DXGI_INTEROP_LOCK_FAILED) {
         fprintf(stderr,
                 "Win32DxgiPresenter::EndFrame: wglDXLockObjectsNV failed "
                 "(WinError=0x%lX)\n",
                 static_cast<unsigned long>(context.win_error));
-        Cleanup();
-        return;
+        ShutdownWithCurrentContext();
+        return false;
     }
     if (result == XEMU_WIN32_DXGI_INTEROP_UNLOCK_FAILED) {
         fprintf(stderr,
@@ -823,13 +923,16 @@ void Win32DxgiPresenter::EndFrame(bool vsync)
                 static_cast<unsigned long>(context.win_error));
         m_active.store(false, std::memory_order_release);
         m_pending_size.store(0, std::memory_order_release);
-        return;
+        QuarantineOwners();
+        return false;
     }
 
     if (FAILED(context.dxgi_result)) {
         LogDxgiFailure(context.dxgi_operation, context.dxgi_result);
-        Cleanup();
+        ShutdownWithCurrentContext();
+        return false;
     }
+    return true;
 }
 
 void Win32DxgiPresenter::Resize(int width, int height)
@@ -844,9 +947,11 @@ void Win32DxgiPresenter::Resize(int width, int height)
 }
 
 static Win32DxgiPresenter g_dxgi_presenter;
-static bool g_dxgi_present_requested;
+static XemuWin32DxgiPresentState g_dxgi_present_state =
+    XEMU_WIN32_DXGI_PRESENT_STATE_INIT;
 static bool g_obs_process_checked;
-static bool g_obs_capture_compatibility;
+static bool g_obs_process_running;
+static bool g_blocked_route_logged;
 
 static bool IsObsRunning()
 {
@@ -872,66 +977,129 @@ static bool IsObsRunning()
     return found;
 }
 
-static bool CaptureCompatibilityRequested()
+static XemuWin32CaptureEvidence CaptureEvidence()
 {
-    if (g_obs_capture_compatibility) {
-        return true;
-    }
-
     if (GetModuleHandleW(L"graphics-hook64.dll")) {
-        g_obs_capture_compatibility = true;
-        return true;
+        return XEMU_WIN32_CAPTURE_HOOK_MODULE_PRESENT;
     }
 
-    /* Avoid process enumeration in the per-frame policy update. */
+    /* Process presence is a hint; only the injected module makes SDL unsafe. */
     if (!g_obs_process_checked) {
         g_obs_process_checked = true;
-        g_obs_capture_compatibility = IsObsRunning();
+        g_obs_process_running = IsObsRunning();
     }
-    return g_obs_capture_compatibility;
+    return g_obs_process_running ? XEMU_WIN32_CAPTURE_OBS_PROCESS_HINT :
+                                   XEMU_WIN32_CAPTURE_NONE;
+}
+
+struct PresentPolicyContext {
+    SDL_Window *window;
+    bool vsync;
+};
+
+static bool PolicyInit(void *opaque)
+{
+    PresentPolicyContext *context =
+        static_cast<PresentPolicyContext *>(opaque);
+    return g_dxgi_presenter.Init(context->window);
+}
+
+static bool PolicyBeginFrame(void *opaque)
+{
+    (void)opaque;
+    return g_dxgi_presenter.BeginFrame();
+}
+
+static bool PolicyEndFrame(void *opaque)
+{
+    PresentPolicyContext *context =
+        static_cast<PresentPolicyContext *>(opaque);
+    return g_dxgi_presenter.EndFrame(context->vsync);
+}
+
+static void PolicyShutdown(void *opaque)
+{
+    (void)opaque;
+    g_dxgi_presenter.ShutdownWithCurrentContext();
+}
+
+static bool PolicyIsQuarantined(void *opaque)
+{
+    (void)opaque;
+    return g_dxgi_presenter.IsQuarantined();
+}
+
+static const XemuWin32DxgiPresentOps present_ops = {
+    PolicyInit,
+    PolicyBeginFrame,
+    PolicyEndFrame,
+    PolicyShutdown,
+    PolicyIsQuarantined,
+};
+
+static void LogBlockedRouteOnce(XemuWin32PresentRoute route)
+{
+    if (g_blocked_route_logged ||
+        (route != XEMU_WIN32_PRESENT_DROP &&
+         route != XEMU_WIN32_PRESENT_QUARANTINED)) {
+        return;
+    }
+
+    g_blocked_route_logged = true;
+    if (route == XEMU_WIN32_PRESENT_QUARANTINED) {
+        fprintf(stderr,
+                "win32_dxgi_present: presentation disabled because interop "
+                "ownership is quarantined\n");
+    } else {
+        fprintf(stderr,
+                "win32_dxgi_present: SDL presentation blocked after OBS "
+                "hook detection because DXGI is unavailable\n");
+    }
 }
 
 extern "C" {
 
-bool win32_dxgi_present_init(SDL_Window *window)
+XemuWin32PresentRoute win32_dxgi_present_prepare_frame(SDL_Window *window,
+                                                       bool vsync)
 {
-    return g_dxgi_presenter.Init(window);
+    PresentPolicyContext context = { window, vsync };
+    XemuWin32PresentRoute route = xemu_win32_dxgi_present_prepare(
+        &g_dxgi_present_state, &present_ops, &context, vsync,
+        CaptureEvidence());
+    if (route == XEMU_WIN32_PRESENT_SDL ||
+        route == XEMU_WIN32_PRESENT_DROP) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    LogBlockedRouteOnce(route);
+    return route;
 }
 
-void win32_dxgi_present_set_enabled(SDL_Window *window, bool enabled)
+XemuWin32PresentRoute win32_dxgi_present_finish_frame(
+    SDL_Window *window, XemuWin32PresentRoute route, bool vsync)
 {
-    enabled = enabled || CaptureCompatibilityRequested();
-    if (enabled == g_dxgi_present_requested) {
-        return;
-    }
-
-    g_dxgi_present_requested = enabled;
-    if (enabled) {
-        g_dxgi_presenter.Init(window);
-    } else {
-        g_dxgi_presenter.Cleanup();
-    }
+    PresentPolicyContext context = { window, vsync };
+    /*
+     * This second module check narrows the injection race; it is a mitigation,
+     * not synchronization with the external hook injector. The route selected
+     * for rendering remains fixed for the frame. A late hook drops that frame
+     * and prepares DXGI for the next one.
+     */
+    route = xemu_win32_dxgi_present_finish(
+        &g_dxgi_present_state, &present_ops, &context, route,
+        CaptureEvidence());
+    LogBlockedRouteOnce(route);
+    return route;
 }
 
 void win32_dxgi_present_cleanup(void)
 {
-    g_dxgi_present_requested = false;
-    g_dxgi_presenter.Cleanup();
+    g_dxgi_presenter.ShutdownWithCurrentContext();
+    g_dxgi_present_state = {};
 }
 
 bool win32_dxgi_present_is_active(void)
 {
     return g_dxgi_presenter.IsActive();
-}
-
-void win32_dxgi_present_begin_frame(void)
-{
-    g_dxgi_presenter.BeginFrame();
-}
-
-void win32_dxgi_present_end_frame(bool vsync)
-{
-    g_dxgi_presenter.EndFrame(vsync);
 }
 
 void win32_dxgi_present_resize(int width, int height)
@@ -945,15 +1113,19 @@ void win32_dxgi_present_resize(int width, int height)
 
 extern "C" {
 
-bool win32_dxgi_present_init(SDL_Window *window)
+XemuWin32PresentRoute win32_dxgi_present_prepare_frame(SDL_Window *window,
+                                                       bool vsync)
 {
     (void)window;
-    return false;
+    (void)vsync;
+    return XEMU_WIN32_PRESENT_SDL;
 }
-void win32_dxgi_present_set_enabled(SDL_Window *window, bool enabled)
+XemuWin32PresentRoute win32_dxgi_present_finish_frame(
+    SDL_Window *window, XemuWin32PresentRoute route, bool vsync)
 {
     (void)window;
-    (void)enabled;
+    (void)vsync;
+    return route;
 }
 void win32_dxgi_present_cleanup(void)
 {
@@ -961,13 +1133,6 @@ void win32_dxgi_present_cleanup(void)
 bool win32_dxgi_present_is_active(void)
 {
     return false;
-}
-void win32_dxgi_present_begin_frame(void)
-{
-}
-void win32_dxgi_present_end_frame(bool vsync)
-{
-    (void)vsync;
 }
 void win32_dxgi_present_resize(int width, int height)
 {

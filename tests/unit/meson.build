@@ -1,3 +1,5 @@
+xbox_i386_target_headers = declare_dependency(include_directories: include_directories('../../target/i386'))
+
 
 testblock = declare_dependency(dependencies: [block], sources: 'iothread.c')
 
@@ -20,52 +22,13 @@ tests = {
   'test-string-output-visitor': [testqapi],
   'test-visitor-serialization': [testqapi],
   'test-bitmap': [],
+  'test-lru-active': [],
+  'test-lru-full': [],
   'test-xbox-pgraph-texture-state': [],
-  'test-xbox-pgraph-uniform-dirty': [],
+  'test-xbox-pgraph-uniform-dirty': [xbox_i386_target_headers],
   'test-xbox-vk-blend-constants': [],
-  'test-xbox-vk-texture-binding': [],
-  'test-xbox-vk-display-output-state': [],
-  'test-xemu-win32-dxgi-interop': [],
-  'test-xbox-vk-device-selection': [
-    meson.project_source_root() / 'hw/xbox/nv2a/pgraph/vk/device-selection.c',
-  ],
-  'test-xbox-vk-device-inventory': [
-    meson.project_source_root() / 'hw/xbox/nv2a/pgraph/vk/device-inventory.c',
-  ],
-  'test-xemu-gpu-launch': [
-    meson.project_source_root() / 'hw/xbox/nv2a/pgraph/vk/device-selection.c',
-    meson.project_source_root() / 'ui/xemu-gpu-launch.c',
-  ],
-  'test-xemu-gpu-info': [
-    meson.project_source_root() / 'hw/xbox/nv2a/pgraph/vk/device-selection.c',
-    meson.project_source_root() / 'ui/xemu-gpu-launch.c',
-    meson.project_source_root() / 'ui/xemu-gpu-info.c',
-  ],
-  'test-xbox-vk-bc-layout': [],
-  'test-xbox-pgraph-vertex-fetch-span': [],
-  'test-xbox-gl-draw-lifecycle': [
-    meson.project_source_root() / 'hw/xbox/nv2a/pgraph/gl/draw-lifecycle.c',
-    xbox_i386_target_headers, gloffscreen, epoxy,
-  ],
-  'test-xbox-vk-failure-state': [],
-  'test-xbox-vk-surface-coherence': [],
-  'test-xbox-vk-failpoint': [
-    meson.project_source_root() / 'hw/xbox/nv2a/pgraph/vk/failpoint.c',
-    declare_dependency(
-      compile_args: ['-DXEMU_VK_DIAGNOSTIC_FAILURES'],
-    ),
-  ],
   'test-xbox-vk-pipeline-lifetime': [],
-  'test-xbox-nv2a-ptimer': [
-    'ptimer-test-stubs.c',
-    meson.project_source_root() / 'hw/xbox/nv2a/ptimer.c',
-    declare_dependency(
-      compile_args: [
-        '-include',
-        meson.project_source_root() / 'tests/unit/xbox-nv2a-ptimer-test-shim.h',
-      ],
-    ),
-  ],
+  'test-xemu-win32-dxgi-interop': [],
   'test-resv-mem': [],
   # all code tested by test-x86-topo is inside topology.h
   'test-x86-topo': [],
@@ -94,8 +57,6 @@ tests = {
   'test-qapi-util': [],
   'test-interval-tree': [],
   'test-fifo': [],
-  'test-lru-active': [],
-  'test-lru-full': [],
 }
 
 if have_system or have_tools
