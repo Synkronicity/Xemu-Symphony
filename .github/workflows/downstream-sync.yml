@@ -45,22 +45,30 @@ jobs:
         run: |
           echo "Attempting merge of upstream/master..."
           if ! git merge --no-commit --no-ff upstream/master; then
-           echo "Checking for modify/delete conflicts on files deleted downstream..."
-           # Auto-resolve modify/delete conflicts where HEAD deleted the file (UD)
-           DELETED_CONFLCITS=$(git status --porcelain | grep '^UD ' | awk '{print $2}')
-           if [ -n "$DELETED_CONFLICTS" ]; then
-            echo "Discarding upstream edits for files deleted in downstream:"
-            echo "$DELETED_CONFLICTS"
-            echo "$DELETED_CONFLICTS" | xargs -r git rm -f
-           fi
+            echo "Checking for modify/delete conflicts on files deleted downstream..."
+            # 1. Auto-resolve modify/delete conflicts where HEAD deleted the file (DU)
+            DELETED_CONFLICTS=$(git status --porcelain | awk '$1 == "DU" {print $2}')
+            if [ -n "$DELETED_CONFLICTS" ]; then
+              echo "Discarding upstream edits for files deleted in downstream:"
+              echo "$DELETED_CONFLICTS"
+              echo "$DELETED_CONFLICTS" | xargs -r git rm -f
+            fi
 
-           # Halt if actual code conflicts remain (UU = both modified)
-           if git status --porcelain | grep -q '^UU '; then
-            echo "::error::Unresolved code merge conflicts detected with upstream/master!"
-            git status --short
-            exit 1
-           fi
-           echo "Ephemeral conflicts resolved successfully."
+            # 2. Auto-resolve content conflicts (UU) on downstream CI workflows and docs
+            DOC_CONFLICTS=$(git status --porcelain | awk '$1 == "UU" && ($2 ~ /^\.github\// || $2 == "CONTRIBUTING.md" || $2 == "README.md") {print $2}')
+            if [ -n "$DOC_CONFLICTS" ]; then
+              echo "Retaining downstream version for CI/documentation files:"
+              echo "$DOC_CONFLICTS"
+              echo "$DOC_CONFLICTS" | xargs -r -I{} sh -c 'git checkout --ours -- "{}" && git add "{}"'
+            fi
+
+            # 3. Halt if genuine C/C++ source code conflicts remain
+            if [ -n "$(git ls-files -u)" ]; then
+              echo "::error::Unresolved code merge conflicts detected with upstream/master!"
+              git status --short
+              exit 1
+            fi
+            echo "Ephemeral conflicts resolved successfully."
           fi
 
       - name: Update Submodules
@@ -139,22 +147,30 @@ jobs:
         run: |
           echo "Attempting merge of upstream/master..."
           if ! git merge --no-commit --no-ff upstream/master; then
-           echo "Checking for modify/delete conflicts on files deleted downstream..."
-           # Auto-resolve modify/delete conflicts where HEAD deleted the file (UD)
-           DELETED_CONFLCITS=$(git status --porcelain | grep '^UD ' | awk '{print $2}')
-           if [ -n "$DELETED_CONFLICTS" ]; then
-            echo "Discarding upstream edits for files deleted in downstream:"
-            echo "$DELETED_CONFLICTS"
-            echo "$DELETED_CONFLICTS" | xargs -r git rm -f
-           fi
+            echo "Checking for modify/delete conflicts on files deleted downstream..."
+            # 1. Auto-resolve modify/delete conflicts where HEAD deleted the file (DU)
+            DELETED_CONFLICTS=$(git status --porcelain | awk '$1 == "DU" {print $2}')
+            if [ -n "$DELETED_CONFLICTS" ]; then
+              echo "Discarding upstream edits for files deleted in downstream:"
+              echo "$DELETED_CONFLICTS"
+              echo "$DELETED_CONFLICTS" | xargs -r git rm -f
+            fi
 
-           # Halt if actual code conflicts remain (UU = both modified)
-           if git status --porcelain | grep -q '^UU '; then
-            echo "::error::Unresolved code merge conflicts detected with upstream/master!"
-            git status --short
-            exit 1
-           fi
-           echo "Ephemeral conflicts resolved successfully."
+            # 2. Auto-resolve content conflicts (UU) on downstream CI workflows and docs
+            DOC_CONFLICTS=$(git status --porcelain | awk '$1 == "UU" && ($2 ~ /^\.github\// || $2 == "CONTRIBUTING.md" || $2 == "README.md") {print $2}')
+            if [ -n "$DOC_CONFLICTS" ]; then
+              echo "Retaining downstream version for CI/documentation files:"
+              echo "$DOC_CONFLICTS"
+              echo "$DOC_CONFLICTS" | xargs -r -I{} sh -c 'git checkout --ours -- "{}" && git add "{}"'
+            fi
+
+            # 3. Halt if genuine C/C++ source code conflicts remain
+            if [ -n "$(git ls-files -u)" ]; then
+              echo "::error::Unresolved code merge conflicts detected with upstream/master!"
+              git status --short
+              exit 1
+            fi
+            echo "Ephemeral conflicts resolved successfully."
           fi
 
       - name: Update Submodules
