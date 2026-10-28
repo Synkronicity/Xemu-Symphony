@@ -69,7 +69,9 @@
 #define GS_MINT  (1 << 7)       /* ro */
 #define GS_POINT (1 << 6)       /* ro */
 #define GS_PIINT (1 << 5)       /* ro */
+#ifndef GS_SOINT
 #define GS_SOINT (1 << 4)       /* ro */
+#endif
 #define GS_RSRVD (1 << 3)
 #define GS_MOINT (1 << 2)       /* ro */
 #define GS_MIINT (1 << 1)       /* ro */
@@ -183,7 +185,14 @@ static void update_sr(AC97LinkState *s, AC97BusMasterRegs *r, uint32_t new_sr)
 
     r->sr = new_sr;
 
+    uint32_t mask = 0;
     if (bm_index >= 0 && bm_index < 3) {
+        mask = masks[bm_index];
+    } else if (bm_index == SO_INDEX) {
+        mask = GS_SOINT;
+    }
+
+    if (mask) {
         bool channel_active = false;
         if ((r->sr & SR_BCIS) && (r->cr & CR_IOCE)) {
             channel_active = true;
@@ -196,13 +205,13 @@ static void update_sr(AC97LinkState *s, AC97BusMasterRegs *r, uint32_t new_sr)
         }
 
         if (channel_active) {
-            s->glob_sta |= masks[bm_index];
+            s->glob_sta |= mask;
         } else {
-            s->glob_sta &= ~masks[bm_index];
+            s->glob_sta &= ~mask;
         }
     }
 
-    int global_level = (s->glob_sta & (GS_PIINT | GS_POINT | GS_MINT)) ? 1 : 0;
+    int global_level = (s->glob_sta & (GS_PIINT | GS_POINT | GS_MINT | GS_SOINT)) ? 1 : 0;
     dolog("update_sr: bm=%d sr=0x%x cr=0x%x glob_sta=0x%x global_level=%d",
           bm_index, r->sr, r->cr, s->glob_sta, global_level);
     pci_set_irq(s->pci_dev, global_level);
@@ -984,6 +993,33 @@ static int write_audio(AC97LinkState *s, AC97BusMasterRegs *r,
     return written;
 }
 
+static int write_audio_so(AC97LinkState *s, AC97BusMasterRegs *r,
+                          int max, int *stop)
+{
+    QEMU_UNINITIALIZED uint8_t tmpbuf[4096];
+    uint32_t addr = r->bd.addr;
+    uint32_t temp = r->picb << 1;
+    uint32_t written = 0;
+    int to_copy = 0;
+    temp = MIN(temp, max);
+
+    if (!temp) {
+        *stop = 1;
+        return 0;
+    }
+
+    while (temp) {
+        to_copy = MIN(temp, (int)sizeof(tmpbuf));
+        dma_memory_read(s->as, addr, tmpbuf, to_copy, MEMTXATTRS_UNSPECIFIED);
+        temp -= to_copy;
+        addr += to_copy;
+        written += to_copy;
+    }
+
+    r->bd.addr = addr;
+    return written;
+}
+
 static void write_bup(AC97LinkState *s, int elapsed)
 {
     dolog("write_bup");
@@ -1112,6 +1148,12 @@ static void transfer_audio(AC97LinkState *s, int index, int elapsed)
             r->picb -= (temp >> 1);
             break;
 
+        case SO_INDEX:
+            temp = write_audio_so(s, r, elapsed, &stop);
+            elapsed -= temp;
+            r->picb -= (temp >> 1);
+            break;
+
         case PI_INDEX:
         case MC_INDEX:
             temp = read_audio(s, r, elapsed, &stop);
@@ -1163,9 +1205,22 @@ static void po_callback(void *opaque, int free)
 
 void ac97_step_playback(AC97LinkState *s, int bytes)
 {
-    AC97BusMasterRegs *r = &s->bm_regs[PO_INDEX];
-    if ((r->cr & CR_RPBM) && (!(r->sr & SR_DCH) || r->picb > 0)) {
-        transfer_audio(s, PO_INDEX, bytes);
+    static const int playback_indices[] = {PO_INDEX, SO_INDEX};
+    for (size_t i = 0; i < ARRAY_SIZE(playback_indices); i++) {
+        int idx = playback_indices[i];
+        AC97BusMasterRegs *r = &s->bm_regs[idx];
+        if ((r->cr & CR_RPBM) && (!(r->sr & SR_DCH) || r->picb > 0)) {
+            int step_bytes = bytes;
+            if (idx == SO_INDEX) {
+                AC97BusMasterRegs *po = &s->bm_regs[PO_INDEX];
+                uint32_t po_len = po->bd.ctl_len & 0xffff;
+                uint32_t so_len = r->bd.ctl_len & 0xffff;
+                if (po_len > 0 && so_len >= po_len * 2) {
+                    step_bytes = bytes * 2;
+                }
+            }
+            transfer_audio(s, idx, step_bytes);
+        }
     }
 }
 
@@ -1344,6 +1399,7 @@ static void ac97_on_reset(AC97LinkState *s)
     reset_bm_regs(s, &s->bm_regs[0]);
     reset_bm_regs(s, &s->bm_regs[1]);
     reset_bm_regs(s, &s->bm_regs[2]);
+    reset_bm_regs(s, &s->bm_regs[SO_INDEX]);
 
     /*
      * Reset the mixer too. The Windows XP driver seems to rely on

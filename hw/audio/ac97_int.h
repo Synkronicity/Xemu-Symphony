@@ -33,6 +33,8 @@ enum {
     LAST_INDEX
 };
 
+#define GS_SOINT (1 << 4)
+
 typedef struct BD {
     uint32_t addr;
     uint32_t ctl_len;
