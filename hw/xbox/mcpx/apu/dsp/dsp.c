@@ -46,7 +46,7 @@ static int g_gp_frame_count = 0;
  * Shared peripheral I/O helpers, used by both backends via callbacks.
  */
 
-uint32_t read_peripheral(DSPState *dsp, uint32_t address)
+static uint32_t read_peripheral(DSPState *dsp, uint32_t address)
 {
     uint32_t v = 0xababa;
     switch (address) {
@@ -63,13 +63,7 @@ uint32_t read_peripheral(DSPState *dsp, uint32_t address)
         v = dsp->hpcr;
         break;
     case DSP_REG_PERIPH_HBAR: /* 0xFFFFC5 */
-        v = dsp->hbar;
-        if (dsp->is_gp) {
-            v |= dsp->interrupts;
-            if (dsp->dma.eol) {
-                v |= INTERRUPT_DMA_EOL;
-            }
-        }
+        v = (dsp->hbar & ~0x86) | (dsp->interrupts & 0x06) | (dsp->dma.eol ? INTERRUPT_DMA_EOL : 0);
         break;
     case DSP_REG_PERIPH_HORX: /* 0xFFFFC6 */
         v = dsp->horx;
@@ -112,7 +106,7 @@ uint32_t read_peripheral(DSPState *dsp, uint32_t address)
     return v;
 }
 
-void write_peripheral(DSPState *dsp, uint32_t address, uint32_t value)
+static void write_peripheral(DSPState *dsp, uint32_t address, uint32_t value)
 {
     switch (address) {
     case DSP_REG_PERIPH_HCR: /* 0xFFFFC2 */
@@ -126,11 +120,9 @@ void write_peripheral(DSPState *dsp, uint32_t address, uint32_t value)
         break;
     case DSP_REG_PERIPH_HBAR: /* 0xFFFFC5 */
         dsp->hbar = value;
-        if (dsp->is_gp) {
-            dsp->interrupts &= ~value;
-            if (value & INTERRUPT_DMA_EOL) {
-                dsp->dma.eol = false;
-            }
+        dsp->interrupts &= ~value;
+        if (value & INTERRUPT_DMA_EOL) {
+            dsp->dma.eol = false;
         }
         break;
     case DSP_REG_PERIPH_HOTX: /* 0xFFFFC7 */
@@ -184,7 +176,7 @@ static void c_write_peripheral(dsp_core_t *core, uint32_t address,
     write_peripheral((DSPState *)core->opaque, address, value);
 }
 
-void dsp_start_frame_impl(DSPState *dsp)
+static void dsp_start_frame_impl(DSPState *dsp)
 {
     dsp->interrupts |= INTERRUPT_START_FRAME;
     dsp->hsr |= DSP_HSR_HRDF;
@@ -287,6 +279,7 @@ void dsp_run(DSPState *dsp, int cycles)
         core->cycle_count += core->instr_cycle;
 
         if (core->is_idle) {
+            dsp->save_cycles = 0;
             break;
         }
     }
@@ -348,9 +341,9 @@ bool dsp_bootstrap_ep_firmware(DSPState *dsp)
     }
 
     size_t total_words = file_size / 4;
-    if (total_words < (0xC8 + 0x17F)) {
+    if (total_words < (0xC8 + 0x180)) {
         fprintf(stderr, "[APU EP] Warning: %s is too small (%zu words, expected >= %d)\n",
-                found_path, total_words, 0xC8 + 0x17F);
+                found_path, total_words, 0xC8 + 0x180);
         fclose(f);
         return false;
     }
@@ -372,8 +365,8 @@ bool dsp_bootstrap_ep_firmware(DSPState *dsp)
         dsp_write_memory(dsp, 'P', 0x0000 + i, word & 0x00FFFFFF);
     }
 
-    /* Segment 2: 0x0180 (0x17F words) */
-    for (size_t i = 0; i < 0x17F && idx < total_words; i++, idx++) {
+    /* Segment 2: 0x0180 (0x180 words) */
+    for (size_t i = 0; i < 0x180 && idx < total_words; i++, idx++) {
         uint32_t word = le32_to_cpu(buf[idx]);
         dsp_write_memory(dsp, 'P', 0x0180 + i, word & 0x00FFFFFF);
     }
