@@ -32,6 +32,7 @@
 #include "interp/dsp_cpu_regs.h"
 #include "trace.h"
 #include "ui/xemu-settings.h"
+#include "symphony_ep_rom.h"
 
 /* Defines */
 #define BITMASK(x) ((1 << (x)) - 1)
@@ -288,7 +289,7 @@ void dsp_run(DSPState *dsp, int cycles)
 bool dsp_bootstrap_ep_firmware(DSPState *dsp)
 {
     if (getenv("XEMU_NO_BYOF") != NULL) {
-        return false;
+        goto fallback_builtin;
     }
 
     FILE *f = NULL;
@@ -322,12 +323,32 @@ bool dsp_bootstrap_ep_firmware(DSPState *dsp)
     }
 
     if (!f) {
-        static bool warned = false;
-        if (!warned) {
-            fprintf(stderr, "[APU EP] Notice: dolby_ep.bin not found, running without EP firmware\n");
-            warned = true;
+fallback_builtin:
+        static bool notice_logged = false;
+        if (!notice_logged) {
+            fprintf(stderr,
+                    "[APU EP] Notice: Loading built-in Symphony EP micro-kernel (%d words)\n",
+                    SYMPHONY_EP_ROM_WORDS);
+            notice_logged = true;
         }
-        return false;
+
+        /* Segment 1: 0x0000 (0xC8 = 200 words) */
+        for (size_t i = 0; i < SYMPHONY_EP_SEG1_WORDS; i++) {
+            dsp_write_memory(dsp, 'P', 0x0000 + i, symphony_ep_seg1[i] & 0x00FFFFFF);
+        }
+
+        /* Segment 2: 0x0180 (0x180 = 384 words) */
+        for (size_t i = 0; i < SYMPHONY_EP_SEG2_WORDS; i++) {
+            dsp_write_memory(dsp, 'P', 0x0180 + i, symphony_ep_seg2[i] & 0x00FFFFFF);
+        }
+
+        /* Safety guard: fill P:0x0300..0x0304 with rts (0x00000C) */
+        for (size_t i = 0; i < 5; i++) {
+            dsp_write_memory(dsp, 'P', 0x0300 + i, 0x00000C);
+        }
+
+        dsp_invalidate_opcache(dsp);
+        return true;
     }
 
     fseek(f, 0, SEEK_END);
@@ -335,25 +356,28 @@ bool dsp_bootstrap_ep_firmware(DSPState *dsp)
     fseek(f, 0, SEEK_SET);
 
     if (file_size <= 0) {
-        fprintf(stderr, "[APU EP] Warning: %s is empty\n", found_path);
+        fprintf(stderr, "[APU EP] Warning: %s is empty, falling back to built-in Symphony EP\n", found_path);
         fclose(f);
-        return false;
+        f = NULL;
+        goto fallback_builtin;
     }
 
     size_t total_words = file_size / 4;
     if (total_words < (0xC8 + 0x180)) {
-        fprintf(stderr, "[APU EP] Warning: %s is too small (%zu words, expected >= %d)\n",
+        fprintf(stderr, "[APU EP] Warning: %s is too small (%zu words, expected >= %d), falling back to built-in Symphony EP\n",
                 found_path, total_words, 0xC8 + 0x180);
         fclose(f);
-        return false;
+        f = NULL;
+        goto fallback_builtin;
     }
 
     uint32_t *buf = g_malloc(total_words * sizeof(uint32_t));
     if (fread(buf, sizeof(uint32_t), total_words, f) != total_words) {
-        fprintf(stderr, "[APU EP] Warning: Failed reading %s\n", found_path);
+        fprintf(stderr, "[APU EP] Warning: Failed reading %s, falling back to built-in Symphony EP\n", found_path);
         g_free(buf);
         fclose(f);
-        return false;
+        f = NULL;
+        goto fallback_builtin;
     }
     fclose(f);
 
@@ -375,6 +399,13 @@ bool dsp_bootstrap_ep_firmware(DSPState *dsp)
     for (size_t i = 0; idx < total_words; i++, idx++) {
         uint32_t word = le32_to_cpu(buf[idx]);
         dsp_write_memory(dsp, 'P', 0x0300 + i, word & 0x00FFFFFF);
+    }
+
+    /* Safety guard: if external ROM had no segment 3, fill P:0x0300..0x0304 with rts (0x00000C) */
+    if (total_words <= (0xC8 + 0x180)) {
+        for (size_t i = 0; i < 5; i++) {
+            dsp_write_memory(dsp, 'P', 0x0300 + i, 0x00000C);
+        }
     }
 
     dsp_invalidate_opcache(dsp);
