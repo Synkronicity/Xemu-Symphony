@@ -21,10 +21,15 @@
  */
 
 #include "hw/xbox/mcpx/apu/apu_int.h"
+#include "hle_freeverb.h"
+#include "hle_binaural.h"
 
 #define EP_SUBFRAME_CYCLES 12800
 
 static const int16_t ep_silence[256][2] = { 0 };
+
+static HleFreeverbState s_freeverb;
+static HleBinauralState s_binaural;
 
 static inline float clampf(float v, float min_val, float max_val)
 {
@@ -52,12 +57,11 @@ void mcpx_apu_update_dsp_preference(MCPXAPUState *d)
     static int last_known_dsp_pref = -1;
 
     if (last_known_dsp_pref != (int)g_config.audio.use_dsp) {
+        d->monitor.point = MCPX_APU_DEBUG_MON_GP_OR_EP;
         if (g_config.audio.use_dsp) {
-            d->monitor.point = MCPX_APU_DEBUG_MON_GP_OR_EP;
             d->gp.realtime = true;
             d->ep.realtime = true;
         } else {
-            d->monitor.point = MCPX_APU_DEBUG_MON_VP;
             d->gp.realtime = false;
             d->ep.realtime = false;
         }
@@ -481,105 +485,133 @@ const MemoryRegionOps ep_ops = {
 
 void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_PER_FRAME])
 {
-    /* Write VP results to the GP DSP MIXBUF */
-    for (int mixbin = 0; mixbin < NUM_MIXBINS; mixbin++) {
-        uint32_t base = GP_DSP_MIXBUF_BASE + mixbin * NUM_SAMPLES_PER_FRAME;
-        for (int sample = 0; sample < NUM_SAMPLES_PER_FRAME; sample++) {
-            dsp_write_memory(d->gp.dsp, 'X', base + sample,
-                             float_to_24b(mixbins[mixbin][sample]));
+    bool lle_dsp = g_config.audio.use_dsp;
+    bool is_headphones = (g_config.audio.endpoint_mode == 1);
+
+    /* Write VP results to the GP DSP MIXBUF if LLE DSP is enabled */
+    if (lle_dsp) {
+        for (int mixbin = 0; mixbin < NUM_MIXBINS; mixbin++) {
+            uint32_t base = GP_DSP_MIXBUF_BASE + mixbin * NUM_SAMPLES_PER_FRAME;
+            for (int sample = 0; sample < NUM_SAMPLES_PER_FRAME; sample++) {
+                dsp_write_memory(d->gp.dsp, 'X', base + sample,
+                                 float_to_24b(mixbins[mixbin][sample]));
+            }
         }
     }
 
     bool ep_enabled = (d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPRST) &&
                       (d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPDSPRST);
 
-    /* Run GP */
-    if ((d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPRST) &&
-        (d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPDSPRST)) {
-        dsp_start_frame(d->gp.dsp);
-        dsp_set_halt_requested(d->gp.dsp, false);
-        dsp_set_cycle_count(d->gp.dsp, 0);
-        while (!dsp_get_halt_requested(d->gp.dsp) && d->gp.realtime) {
-            dsp_run(d->gp.dsp, 1000);
-        }
-        g_dbg.gp.cycles = dsp_get_cycle_count(d->gp.dsp);
+    float wet_fl[NUM_SAMPLES_PER_FRAME] = { 0 };
+    float wet_fr[NUM_SAMPLES_PER_FRAME] = { 0 };
+    float wet_rl[NUM_SAMPLES_PER_FRAME] = { 0 };
+    float wet_rr[NUM_SAMPLES_PER_FRAME] = { 0 };
 
-        if (!d->is_5_1_active) {
-            int off = (d->ep_frame_div % 8) * NUM_SAMPLES_PER_FRAME;
+    float gp_left[NUM_SAMPLES_PER_FRAME] = { 0 };
+    float gp_right[NUM_SAMPLES_PER_FRAME] = { 0 };
+
+    /* Step A — GP DSP vs. HLE Freeverb Execution */
+    if (lle_dsp) {
+        if ((d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPRST) &&
+            (d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPDSPRST)) {
+            dsp_start_frame(d->gp.dsp);
+            dsp_set_halt_requested(d->gp.dsp, false);
+            dsp_set_cycle_count(d->gp.dsp, 0);
+            while (!dsp_get_halt_requested(d->gp.dsp) && d->gp.realtime) {
+                dsp_run(d->gp.dsp, 1000);
+            }
+            g_dbg.gp.cycles = dsp_get_cycle_count(d->gp.dsp);
+
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
                 uint32_t l = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + i);
                 uint32_t r = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + 0x20 + i);
-                float gp_left = int24_to_float(l);
-                float gp_right = int24_to_float(r);
-                d->monitor.frame_buf[off + i][0] = float_to_s16(clampf(gp_left, -1.0f, 1.0f));
-                d->monitor.frame_buf[off + i][1] = float_to_s16(clampf(gp_right, -1.0f, 1.0f));
+                gp_left[i] = int24_to_float(l);
+                gp_right[i] = int24_to_float(r);
             }
         }
+    } else {
+        /* Skip dsp_run(d->gp.dsp) completely: zero GP CPU overhead */
+        hle_freeverb_set_params(&s_freeverb, g_config.audio.freeverb_roomsize,
+                                g_config.audio.freeverb_damp,
+                                g_config.audio.freeverb_wet, 1.0f);
+        hle_freeverb_process_subframe(&s_freeverb, mixbins, wet_fl, wet_fr,
+                                      wet_rl, wet_rr);
     }
 
-    /* Forward multichannel PCM blocks to EP aperture (X:0x4000) using 512-word (0x0200) strides per pair */
-    if (d->is_5_1_active && ep_enabled) {
-        int off = (d->ep_frame_div % 8) * NUM_SAMPLES_PER_FRAME;
-        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-            int sample_idx = (off + i) * 2;
-            /* Pair 0 (FL / FR): offset 0x0000 */
-            dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 0 * 0x0200 + sample_idx,
-                             float_to_24b(mixbins[0][i]));
-            dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 0 * 0x0200 + sample_idx + 1,
-                             float_to_24b(mixbins[1][i]));
-            /* Pair 1 (FC / LFE): offset 0x0200 */
-            dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 1 * 0x0200 + sample_idx,
-                             float_to_24b(mixbins[2][i]));
-            dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 1 * 0x0200 + sample_idx + 1,
-                             float_to_24b(mixbins[3][i]));
-            /* Pair 2 (RL / RR): offset 0x0400 */
-            dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 2 * 0x0200 + sample_idx,
-                             float_to_24b(mixbins[4][i]));
-            dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 2 * 0x0200 + sample_idx + 1,
-                             float_to_24b(mixbins[5][i]));
+    /* Step B — Assemble the 6-Channel Internal Frame ch6[32][6] (FL, FR, FC, LFE, RL, RR) */
+    float ch6[NUM_SAMPLES_PER_FRAME][6];
+    for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+        if (lle_dsp) {
+            ch6[i][0] = mixbins[0][i] + gp_left[i];
+            ch6[i][1] = mixbins[1][i] + gp_right[i];
+            ch6[i][2] = mixbins[2][i];
+            ch6[i][3] = mixbins[3][i];
+            ch6[i][4] = mixbins[4][i];
+            ch6[i][5] = mixbins[5][i];
+        } else {
+            ch6[i][0] = mixbins[0][i] + wet_fl[i];
+            ch6[i][1] = mixbins[1][i] + wet_fr[i];
+            ch6[i][2] = mixbins[2][i];
+            ch6[i][3] = mixbins[3][i];
+            ch6[i][4] = mixbins[4][i] + wet_rl[i];
+            ch6[i][5] = mixbins[5][i] + wet_rr[i];
         }
     }
 
-    /* Surround monitor buffer routing */
-    if (d->is_5_1_active) {
-        int off = (d->ep_frame_div % 8) * NUM_SAMPLES_PER_FRAME;
+    int off = (d->ep_frame_div % 8) * NUM_SAMPLES_PER_FRAME;
 
-        if (ep_enabled) {
-            /* Full 6-channel discrete surround with additive GP 2D stereo bus mixing into FL/FR */
+    /* Step C — Route to Output Buffer (surround_buf vs. frame_buf) Based on (d->is_5_1_active, is_headphones) */
+    if (d->is_5_1_active && !is_headphones && !g_config.audio.dolby_surround_ltrt) {
+        /* Case 1: EEPROM = Surround + Speakers -> Discrete 6-channel LPCM */
+        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+            d->monitor.surround_buf[off + i][0] = float_to_s16(clampf(ch6[i][0], -1.0f, 1.0f));
+            d->monitor.surround_buf[off + i][1] = float_to_s16(clampf(ch6[i][1], -1.0f, 1.0f));
+            d->monitor.surround_buf[off + i][2] = float_to_s16(clampf(ch6[i][2], -1.0f, 1.0f));
+            d->monitor.surround_buf[off + i][3] = float_to_s16(clampf(ch6[i][3], -1.0f, 1.0f));
+            d->monitor.surround_buf[off + i][4] = float_to_s16(clampf(ch6[i][4], -1.0f, 1.0f));
+            d->monitor.surround_buf[off + i][5] = float_to_s16(clampf(ch6[i][5], -1.0f, 1.0f));
+        }
+    } else if (d->is_5_1_active && is_headphones) {
+        /* Case 2: EEPROM = Surround + Headphones -> Binaural HRTF 3D Downmix */
+        hle_binaural_downmix_subframe(&s_binaural, ch6, &d->monitor.frame_buf[off]);
+    } else if (d->is_5_1_active && !is_headphones && g_config.audio.dolby_surround_ltrt) {
+        /* Case 3: EEPROM = Surround + Speakers + Dolby Surround Lt/Rt Matrix */
+        hle_prologic_ltrt_downmix_subframe(&s_binaural, ch6, &d->monitor.frame_buf[off]);
+    } else {
+        /* Case 4: EEPROM = Stereo (Speakers or Headphones) */
+        if (lle_dsp) {
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-                uint32_t l = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + i);
-                uint32_t r = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + 0x20 + i);
-                float gp_left = int24_to_float(l);
-                float gp_right = int24_to_float(r);
-                float fl = mixbins[0][i] + gp_left;
-                float fr = mixbins[1][i] + gp_right;
-
-                d->monitor.surround_buf[off + i][0] = float_to_s16(clampf(fl, -1.0f, 1.0f));
-                d->monitor.surround_buf[off + i][1] = float_to_s16(clampf(fr, -1.0f, 1.0f));
-                d->monitor.surround_buf[off + i][2] = float_to_s16(clampf(mixbins[2][i], -1.0f, 1.0f));
-                d->monitor.surround_buf[off + i][3] = float_to_s16(clampf(mixbins[3][i], -1.0f, 1.0f));
-                d->monitor.surround_buf[off + i][4] = float_to_s16(clampf(mixbins[4][i], -1.0f, 1.0f));
-                d->monitor.surround_buf[off + i][5] = float_to_s16(clampf(mixbins[5][i], -1.0f, 1.0f));
+                d->monitor.frame_buf[off + i][0] = float_to_s16(clampf(gp_left[i], -1.0f, 1.0f));
+                d->monitor.frame_buf[off + i][1] = float_to_s16(clampf(gp_right[i], -1.0f, 1.0f));
             }
         } else {
-            /* Bootloader intro (!ep_enabled): mirror GP mixbuffer to FL/FR and zero surround channels */
-            for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-                uint32_t l = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + i);
-                uint32_t r = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + 0x20 + i);
-                float gp_left = int24_to_float(l);
-                float gp_right = int24_to_float(r);
-                d->monitor.surround_buf[off + i][0] = float_to_s16(clampf(gp_left, -1.0f, 1.0f));
-                d->monitor.surround_buf[off + i][1] = float_to_s16(clampf(gp_right, -1.0f, 1.0f));
-                d->monitor.surround_buf[off + i][2] = 0;
-                d->monitor.surround_buf[off + i][3] = 0;
-                d->monitor.surround_buf[off + i][4] = 0;
-                d->monitor.surround_buf[off + i][5] = 0;
-            }
+            hle_stereo_pure_downmix_subframe(ch6, &d->monitor.frame_buf[off]);
         }
     }
 
-    /* Run EP */
-    if (ep_enabled) {
+    /* Step D: EP Execution (d->ep.dsp) */
+    if (d->is_5_1_active && ep_enabled) {
+        if (lle_dsp && g_config.audio.dolby_digital_ac3) {
+            for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                int sample_idx = (off + i) * 2;
+                /* Pair 0 (FL / FR): offset 0x0000 */
+                dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 0 * 0x0200 + sample_idx,
+                                 float_to_24b(mixbins[0][i]));
+                dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 0 * 0x0200 + sample_idx + 1,
+                                 float_to_24b(mixbins[1][i]));
+                /* Pair 1 (FC / LFE): offset 0x0200 */
+                dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 1 * 0x0200 + sample_idx,
+                                 float_to_24b(mixbins[2][i]));
+                dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 1 * 0x0200 + sample_idx + 1,
+                                 float_to_24b(mixbins[3][i]));
+                /* Pair 2 (RL / RR): offset 0x0400 */
+                dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 2 * 0x0200 + sample_idx,
+                                 float_to_24b(mixbins[4][i]));
+                dsp_write_memory(d->ep.dsp, 'X', 0x4000 + 2 * 0x0200 + sample_idx + 1,
+                                 float_to_24b(mixbins[5][i]));
+            }
+        }
+
         uint32_t reset_vec =
             dsp_read_memory(d->ep.dsp, 'P', 0x0000) & 0x00ffffff;
         if (reset_vec != 0 && reset_vec != 0x00cacaca) {

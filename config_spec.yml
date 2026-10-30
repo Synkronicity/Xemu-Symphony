@@ -319,6 +319,24 @@ audio:
   hrtf:
     type: bool
     default: true
+  endpoint_mode:
+    type: integer
+    default: 0
+  dolby_surround_ltrt:
+    type: bool
+    default: false
+  dolby_digital_ac3:
+    type: bool
+    default: false
+  freeverb_roomsize:
+    type: number
+    default: 0.55
+  freeverb_damp:
+    type: number
+    default: 0.28
+  freeverb_wet:
+    type: number
+    default: 0.35
   volume_limit:
     type: number
     default: 1

@@ -42,6 +42,7 @@
 #include "../xemu-xbe.h"
 
 #include "../thirdparty/fatx/fatx.h"
+#include "hw/xbox/mcpx/apu/apu.h"
 
 #define DEFAULT_XMU_SIZE 8388608
 
@@ -844,18 +845,241 @@ void MainMenuAudioView::Draw()
         { "All Files", "*" }
     };
 
+    // 1. Volume Section
     SectionTitle("Volume");
-    char buf[32];
-    snprintf(buf, sizeof(buf), "Limit output volume (%d%%)",
+    char vol_buf[32];
+    snprintf(vol_buf, sizeof(vol_buf), "Limit output volume (%d%%)",
              (int)(g_config.audio.volume_limit * 100));
-    Slider("Output volume limit", &g_config.audio.volume_limit, buf);
+    ImGui::PushID("vol_limit_slider");
+    Slider("Output volume limit", &g_config.audio.volume_limit, vol_buf);
+    ImGui::PopID();
 
-    SectionTitle("Firmware");
-    FilePicker("DSP EP ROM", g_config.sys.files.ep_rom_path,
-               rom_file_filters, 3, false, [](const char *path) {
-                   xemu_settings_set_string(&g_config.sys.files.ep_rom_path, path);
-                   g_main_menu.UpdateAboutViewConfigInfo();
-               });
+    // 2. Audio Processing Engine
+    SectionTitle("Audio Processing Engine");
+    Toggle("Hardware DSP Effects (High Accuracy)", &g_config.audio.use_dsp,
+           "ON: Authentic Xbox DSP. OFF: Fast HLE reverb.");
+
+    if (!g_config.audio.use_dsp) {
+        char room_buf[64];
+        snprintf(room_buf, sizeof(room_buf), "Simulated room dimension (%d%%)",
+                 (int)(g_config.audio.freeverb_roomsize * 100));
+        ImGui::PushID("freeverb_roomsize_slider");
+        Slider("Reverb Room Size", &g_config.audio.freeverb_roomsize, room_buf);
+        ImGui::PopID();
+
+        char damp_buf[64];
+        snprintf(damp_buf, sizeof(damp_buf), "High-frequency absorption (%d%%)",
+                 (int)(g_config.audio.freeverb_damp * 100));
+        ImGui::PushID("freeverb_damp_slider");
+        Slider("Reverb High-Frequency Damping", &g_config.audio.freeverb_damp, damp_buf);
+        ImGui::PopID();
+
+        char wet_buf[64];
+        snprintf(wet_buf, sizeof(wet_buf), "Wet reverb send level (%d%%)",
+                 (int)(g_config.audio.freeverb_wet * 100));
+        ImGui::PushID("freeverb_wet_slider");
+        Slider("Reverb Wet Level", &g_config.audio.freeverb_wet, wet_buf);
+        ImGui::PopID();
+
+        ImGui::Spacing();
+        if (ImGui::Button("Reset Reverb to Defaults")) {
+            g_config.audio.freeverb_roomsize = 0.50f;
+            g_config.audio.freeverb_damp = 0.50f;
+            g_config.audio.freeverb_wet = 0.15f;
+        }
+    }
+
+    // 3. Output Endpoint & Xbox EEPROM
+    SectionTitle("Output Endpoint & Xbox EEPROM");
+
+    static int s_eeprom_mode = -1;
+    if (s_eeprom_mode < 0) {
+        s_eeprom_mode = xemu_eeprom_get_audio_mode();
+    }
+
+    static bool s_show_eeprom_restart_popup = false;
+    static const char *s_eeprom_popup_msg = nullptr;
+
+    int endpoint = g_config.audio.endpoint_mode;
+    if (ChevronCombo("Listening Device", &endpoint,
+                     "Speakers (Including AVR / 5.1 DAC / VSS)\0"
+                     "Headphones (Stereo Only)\0",
+                     "Select your physical audio listening environment")) {
+        g_config.audio.endpoint_mode = endpoint;
+    }
+
+    int eeprom_ui_sel = (s_eeprom_mode == XEMU_EEPROM_AUDIO_STEREO) ? 0 : 1;
+    if (ChevronCombo("Xbox System Audio Mode (EEPROM)", &eeprom_ui_sel,
+                     "Stereo (2.0)\0"
+                     "Surround (5.1)\0",
+                     "Non-volatile sound setting stored inside your Xbox EEPROM image")) {
+        int target_mode = (eeprom_ui_sel == 1)
+            ? XEMU_EEPROM_AUDIO_DOLBY_DIGITAL_51
+            : XEMU_EEPROM_AUDIO_STEREO;
+        if (xemu_eeprom_set_audio_mode(target_mode)) {
+            s_eeprom_mode = target_mode;
+            s_eeprom_popup_msg =
+                "Your Xbox EEPROM file has been updated with a recalculated User Section checksum. "
+                "Please restart Xemu Symphony for the new EEPROM audio mode to take effect.";
+            s_show_eeprom_restart_popup = true;
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Advanced Settings")) {
+        if (Toggle("Dolby Surround (Pro Logic Lt/Rt)", &g_config.audio.dolby_surround_ltrt,
+                   "2-channel matrix surround for Pro Logic receivers")) {
+            if (g_config.audio.dolby_surround_ltrt) {
+                g_config.audio.dolby_digital_ac3 = false;
+                xemu_eeprom_set_audio_mode(XEMU_EEPROM_AUDIO_DOLBY_DIGITAL_51);
+                s_eeprom_mode = XEMU_EEPROM_AUDIO_DOLBY_DIGITAL_51;
+                s_eeprom_popup_msg =
+                    "Dolby Surround (Lt/Rt Matrix) mode enabled. Your EEPROM has been configured for "
+                    "Dolby Digital 5.1 with a verified checksum to ensure games output all 6 discrete surround channels. "
+                    "Please restart Xemu Symphony for the matrix downmix to take effect.";
+                s_show_eeprom_restart_popup = true;
+            } else {
+                xemu_eeprom_set_audio_mode(XEMU_EEPROM_AUDIO_STEREO);
+                s_eeprom_mode = XEMU_EEPROM_AUDIO_STEREO;
+                s_eeprom_popup_msg =
+                    "Dolby Surround (Lt/Rt Matrix) mode disabled. Symphony EP micro-kernel re-enabled "
+                    "and EEPROM restored to Stereo. Please restart Xemu Symphony.";
+                s_show_eeprom_restart_popup = true;
+            }
+        }
+
+        if (Toggle("Dolby Digital 5.1 (Bring Your Own License)", &g_config.audio.dolby_digital_ac3,
+                   "Requires external dolby_ep.bin firmware file")) {
+            if (g_config.audio.dolby_digital_ac3) {
+                g_config.audio.dolby_surround_ltrt = false;
+                xemu_eeprom_set_audio_mode(XEMU_EEPROM_AUDIO_DOLBY_DIGITAL_51);
+                s_eeprom_mode = XEMU_EEPROM_AUDIO_DOLBY_DIGITAL_51;
+                s_eeprom_popup_msg =
+                    "Dolby Digital 5.1 (AC-3 BYOL) enabled. Your EEPROM has been configured for Dolby Digital 5.1. "
+                    "Please supply a valid 7,264-word dolby_ep.bin and restart Xemu Symphony.";
+                s_show_eeprom_restart_popup = true;
+            }
+            g_main_menu.UpdateAboutViewConfigInfo();
+        }
+
+        if (g_config.audio.dolby_digital_ac3) {
+            FilePicker("DSP EP ROM", g_config.sys.files.ep_rom_path,
+                       rom_file_filters, 3, false, [](const char *path) {
+                           xemu_settings_set_string(&g_config.sys.files.ep_rom_path, path);
+                           g_main_menu.UpdateAboutViewConfigInfo();
+                       });
+        }
+    }
+
+    // 4. Active Soundstage & Signal Profile
+    SectionTitle("Active Soundstage & Signal Profile");
+
+    bool is_headphones = (g_config.audio.endpoint_mode == 1);
+    bool is_surround = (s_eeprom_mode == XEMU_EEPROM_AUDIO_DOLBY_SURROUND ||
+                        s_eeprom_mode == XEMU_EEPROM_AUDIO_DOLBY_DIGITAL_51);
+
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.10f, 0.12f, 0.85f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.20f, 0.35f, 0.45f, 0.60f));
+
+    if (ImGui::BeginChild("SoundstageCard", ImVec2(0, 160.0f * g_viewport_mgr.m_scale), true)) {
+        ImGui::Dummy(ImVec2(0, 4));
+
+        if (is_surround && is_headphones) {
+            // Profile: Surround + Headphones -> Binaural HRTF
+            ImGui::TextColored(ImVec4(0.9f, 0.4f, 1.0f, 1.0f), "BINAURAL HRTF VIRTUAL SURROUND (5.1 -> 2.0 HEADPHONES)");
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
+                "  Virtual 5.1 Array: [FL -30°] [FC 0°] [FR +30°] + [RL -110°] [RR +110°] + [LFE]");
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f),
+                "      ===> [Woodworth ITD + 6.5 kHz Pinna Convolver] ===> [2.0 Headphones]");
+            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::TextWrapped("Spatializes all 6 discrete Xbox surround channels into a 3D binaural headphone mix in real time. No external HeSuVi, EqualizerAPO, or Virtual Audio Cable required.");
+
+        } else if (is_surround && !is_headphones && g_config.audio.dolby_surround_ltrt) {
+            // Profile: Surround + Speakers + Dolby Surround Lt/Rt
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "DOLBY SURROUND PRO LOGIC Lt/Rt MATRIX (2.0 STEREO)");
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
+                "  [5.1 Surround Channels]  --->  [Lt/Rt Matrix + 90° Phase Biquads]  --->  [2.0 Stereo AVR / TV]");
+            ImGui::TextColored(ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
+                "  Signal Path: Lt = FL + 0.707*FC - 0.707*j*(RL+RR) | Rt = FR + 0.707*FC + 0.707*j*(RL+RR)");
+            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::TextWrapped("Matrix-encodes discrete 5.1 surround into an authentic 2-channel analog Lt/Rt stereo stream decodable by vintage Dolby Pro Logic AVR receivers. Not recommended; only for historical preservation.");
+
+        } else if (is_surround && !is_headphones && !g_config.audio.dolby_surround_ltrt) {
+            // Profile: Surround + Speakers + Discrete 5.1
+            if (g_config.audio.dolby_digital_ac3) {
+                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "AUTHENTIC DOLBY DIGITAL 5.1 AC-3 (firmware required)");
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
+                    "  [FL] [FC] [FR] + [Subwoofer LFE] + [RL] [RR]  --->  [Motorola EP DSP (dolby_ep.bin)]  --->  [S/PDIF]");
+                ImGui::TextColored(ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
+                    "  Hardware Dolby Digital AC-3 Compression Engine");
+                ImGui::Dummy(ImVec2(0, 4));
+                ImGui::TextWrapped("Runs authentic Motorola DSP56362 Dolby Digital AC-3 bitstream compression using your supplied dolby_ep.bin firmware. Not recommended; only for historical preservation. For licensing reasons you must supply your own firmware.");
+            } else {
+                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.9f, 1.0f), "DISCRETE 5.1 MULTICHANNEL LPCM (6-CHANNEL LOSSLESS)");
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
+                    "  [FL]   [FC]   [FR]  +  [Subwoofer LFE]  +  [RL]       [RR]  ---> 6-Channel Discrete LPCM via SDL3");
+                ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f),
+                    "  Symphony EP Micro-Kernel ---> 6-Channel 32-bit Float LPCM via SDL3");
+                ImGui::Dummy(ImVec2(0, 4));
+                ImGui::TextWrapped("Outputs 6 discrete uncompressed LPCM channels directly to your 5.1 AVR (via HDMI) or multi-channel sound card using the built-in open-source Symphony EP micro-kernel. This is the highest fidelity audio setting. Must have a 5.1 endpoint.");
+            }
+
+        } else if (!is_surround && is_headphones) {
+            // Profile: Stereo + Headphones
+            ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), "PURE STEREO HEADPHONES (2.0 UNCOLORED)");
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
+                "  [VP 256 Voices]  --->  [%s]  --->  [Left Ear (0°)]  ( Listener )  [Right Ear (0°)]",
+                g_config.audio.use_dsp ? "LLE GP DSP" : "HLE Freeverb");
+            ImGui::TextColored(ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
+                "  Sensaura XTC Bypassed | Zero Crosstalk Cancellation");
+            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::TextWrapped("Delivers a stereo mix without speaker Cross-Talk Cancellation (XTC). Ideal for games with dedicated headphone mixes (e.g. Doom 3). Otherwise not recommended for the majority of titles.");
+
+        } else {
+            // Profile: Stereo + Speakers
+            ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.5f, 1.0f), "AUTHENTIC 2001 FRONT-SPEAKER STEREO");
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
+                "  [FL Speaker]                ( Listener )                [FR Speaker]");
+            ImGui::TextColored(ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
+                "  Sensaura XTC Front-Speaker Cross-Cancellation Active");
+            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::TextWrapped("Applies the original Xbox Sensaura XTC front-speaker mix. Do not use with headphones.");
+        }
+
+        ImGui::Dummy(ImVec2(0, 4));
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar();
+
+    // 5. EEPROM Update Modal Popup
+    if (s_show_eeprom_restart_popup) {
+        ImGui::OpenPopup("EEPROM Audio Updated");
+        s_show_eeprom_restart_popup = false;
+    }
+
+    if (ImGui::BeginPopupModal("EEPROM Audio Updated", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::PushFont(g_font_mgr.m_menu_font_medium);
+        ImGui::Text("Audio Configuration Changed");
+        ImGui::PopFont();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", s_eeprom_popup_msg ? s_eeprom_popup_msg :
+                           "Your Xbox EEPROM file has been updated with a recalculated User Section checksum. Please restart Xemu Symphony for the new EEPROM audio mode to take effect.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        if (ImGui::Button("OK", ImVec2(120 * g_viewport_mgr.m_scale, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 NetworkInterface::NetworkInterface(pcap_if_t *pcap_desc, char *_friendlyname)
@@ -1570,12 +1794,14 @@ void MainMenuSystemView::Draw()
                    m_dirty = true;
                    g_main_menu.UpdateAboutViewConfigInfo();
                });
-    FilePicker("DSP EP ROM", g_config.sys.files.ep_rom_path,
-               rom_file_filters, 3, false, [this](const char *path) {
-                   xemu_settings_set_string(&g_config.sys.files.ep_rom_path, path);
-                   m_dirty = true;
-                   g_main_menu.UpdateAboutViewConfigInfo();
-               });
+    if (g_config.audio.dolby_digital_ac3) {
+        FilePicker("DSP EP ROM", g_config.sys.files.ep_rom_path,
+                   rom_file_filters, 3, false, [this](const char *path) {
+                       xemu_settings_set_string(&g_config.sys.files.ep_rom_path, path);
+                       m_dirty = true;
+                       g_main_menu.UpdateAboutViewConfigInfo();
+                   });
+    }
     FilePicker("Hard Disk", g_config.sys.files.hdd_path,
                qcow_file_filters, 2, false, [this](const char *path) {
                    xemu_settings_set_string(&g_config.sys.files.hdd_path, path);
@@ -1610,19 +1836,25 @@ void MainMenuAboutView::UpdateConfigInfoText()
         flash_rom_checksum = g_strdup("None");
     }
 
-    gchar *ep_rom_checksum =
-        GetFileMD5Checksum(g_config.sys.files.ep_rom_path);
-    if (!ep_rom_checksum) {
-        ep_rom_checksum = g_strdup("None");
-    }
+    if (g_config.audio.dolby_digital_ac3) {
+        gchar *ep_rom_checksum =
+            GetFileMD5Checksum(g_config.sys.files.ep_rom_path);
+        if (!ep_rom_checksum) {
+            ep_rom_checksum = g_strdup("None");
+        }
 
-    m_config_info_text = g_strdup_printf("MCPX Boot ROM MD5 Hash:        %s\n"
-                                         "Flash ROM (BIOS) MD5 Hash:     %s\n"
-                                         "DSP EP ROM MD5 Hash:           %s",
-                                         bootrom_checksum, flash_rom_checksum, ep_rom_checksum);
+        m_config_info_text = g_strdup_printf("MCPX Boot ROM MD5 Hash:        %s\n"
+                                             "Flash ROM (BIOS) MD5 Hash:     %s\n"
+                                             "DSP EP ROM MD5 Hash:           %s",
+                                             bootrom_checksum, flash_rom_checksum, ep_rom_checksum);
+        g_free(ep_rom_checksum);
+    } else {
+        m_config_info_text = g_strdup_printf("MCPX Boot ROM MD5 Hash:        %s\n"
+                                             "Flash ROM (BIOS) MD5 Hash:     %s",
+                                             bootrom_checksum, flash_rom_checksum);
+    }
     g_free(bootrom_checksum);
     g_free(flash_rom_checksum);
-    g_free(ep_rom_checksum);
 }
 
 void MainMenuAboutView::Draw()
