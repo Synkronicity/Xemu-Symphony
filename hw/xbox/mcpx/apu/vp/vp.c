@@ -1484,16 +1484,13 @@ static void voice_process(MCPXAPUState *d,
 
     for (int b = 0; b < 8; b++) {
         float g = ea_value;
-        float hr;
-        if (use_hrtf && (b < 4)) {
-            // FIXME: Not sure if submix/voice headroom factor in for HRTF
-            hr = 1 << d->vp.hrtf_headroom;
-        } else {
-            hr = 1 << d->vp.submix_headroom[bin[b]];
-        }
-        g *= attenuate(vol[b])/hr;
+        float hr = (use_hrtf && (b < 4))
+                       ? (float)(1 << d->vp.hrtf_headroom)
+                       : (float)(1 << d->vp.submix_headroom[bin[b]]);
+        g *= attenuate(vol[b]) / hr;
+        unsigned int sample_ch = (use_hrtf && (b < 4)) ? (b & 1) : (b % channels);
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-            mixbins[bin[b]][i] += g*samples[i][b % channels];
+            mixbins[bin[b]][i] += g * samples[i][sample_ch];
         }
     }
 

@@ -25,11 +25,13 @@
 #include "hle_binaural.h"
 
 #define EP_SUBFRAME_CYCLES 12800
+#define GP_MAX_SUBFRAME_CYCLES 100000
 
 static const int16_t ep_silence[256][2] = { 0 };
 
 static HleFreeverbState s_freeverb;
 static HleBinauralState s_binaural;
+static int s_gp_handshake_subframes = 64;
 
 static inline float clampf(float v, float min_val, float max_val)
 {
@@ -42,6 +44,17 @@ static inline float clampf(float v, float min_val, float max_val)
     return v;
 }
 
+static inline float soft_clip(float v)
+{
+    float av = fabsf(v);
+    if (av <= 0.90f) {
+        return v;
+    }
+    float excess = av - 0.90f;
+    float mag = 0.90f + 0.10f * (excess / (excess + 0.10f));
+    return (v < 0.0f) ? -mag : mag;
+}
+
 static inline int16_t float_to_s16(float v)
 {
     if (v >= 1.0f) {
@@ -51,6 +64,26 @@ static inline int16_t float_to_s16(float v)
     }
     return (int16_t)lrintf(v * 32767.0f);
 }
+
+static inline uint32_t float_to_24b_clamped(float v)
+{
+    if (isnan(v)) {
+        return 0;
+    }
+    v = clampf(v, -1.0f, 1.0f);
+    double scaled = (double)v * 8388607.0; /* 0x7FFFFF */
+    int32_t int24;
+    if (scaled >= 8388607.0) {
+        int24 = 0x7FFFFF;
+    } else if (scaled <= -8388608.0) {
+        int24 = -8388608;
+    } else {
+        int24 = (int32_t)lrint(scaled);
+    }
+    return (uint32_t)int24 & 0x00FFFFFF;
+}
+#undef float_to_24b
+#define float_to_24b(v) float_to_24b_clamped(v)
 
 void mcpx_apu_update_dsp_preference(MCPXAPUState *d)
 {
@@ -63,7 +96,7 @@ void mcpx_apu_update_dsp_preference(MCPXAPUState *d)
             d->ep.realtime = true;
         } else {
             d->gp.realtime = false;
-            d->ep.realtime = false;
+            d->ep.realtime = true;
         }
         last_known_dsp_pref = g_config.audio.use_dsp;
     }
@@ -382,6 +415,9 @@ static void gp_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         break;
     }
     case NV_PAPU_GPRST:
+        if ((val & NV_PAPU_GPRST_GPRST) && (val & NV_PAPU_GPRST_GPDSPRST)) {
+            s_gp_handshake_subframes = 64;
+        }
         proc_rst_write(d->gp.dsp, d->gp.regs[NV_PAPU_GPRST], val);
         d->gp.regs[NV_PAPU_GPRST] = val;
         break;
@@ -487,14 +523,18 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
 {
     bool lle_dsp = g_config.audio.use_dsp;
     bool is_headphones = (g_config.audio.endpoint_mode == 1);
+    bool run_gp_handshake = (!lle_dsp && s_gp_handshake_subframes > 0);
+
+    uint32_t orig_mixbuf[NUM_MIXBINS][NUM_SAMPLES_PER_FRAME] = { 0 };
 
     /* Write VP results to the GP DSP MIXBUF if LLE DSP is enabled */
     if (lle_dsp) {
         for (int mixbin = 0; mixbin < NUM_MIXBINS; mixbin++) {
             uint32_t base = GP_DSP_MIXBUF_BASE + mixbin * NUM_SAMPLES_PER_FRAME;
             for (int sample = 0; sample < NUM_SAMPLES_PER_FRAME; sample++) {
-                dsp_write_memory(d->gp.dsp, 'X', base + sample,
-                                 float_to_24b(mixbins[mixbin][sample]));
+                uint32_t w = float_to_24b(mixbins[mixbin][sample]);
+                orig_mixbuf[mixbin][sample] = w;
+                dsp_write_memory(d->gp.dsp, 'X', base + sample, w);
             }
         }
     }
@@ -507,8 +547,7 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
     float wet_rl[NUM_SAMPLES_PER_FRAME] = { 0 };
     float wet_rr[NUM_SAMPLES_PER_FRAME] = { 0 };
 
-    float gp_left[NUM_SAMPLES_PER_FRAME] = { 0 };
-    float gp_right[NUM_SAMPLES_PER_FRAME] = { 0 };
+    bool gp_ran = false;
 
     /* Step A — GP DSP vs. HLE Freeverb Execution */
     if (lle_dsp) {
@@ -517,20 +556,29 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
             dsp_start_frame(d->gp.dsp);
             dsp_set_halt_requested(d->gp.dsp, false);
             dsp_set_cycle_count(d->gp.dsp, 0);
-            while (!dsp_get_halt_requested(d->gp.dsp) && d->gp.realtime) {
+            while (!dsp_get_halt_requested(d->gp.dsp) && d->gp.realtime &&
+                   dsp_get_cycle_count(d->gp.dsp) < GP_MAX_SUBFRAME_CYCLES) {
                 dsp_run(d->gp.dsp, 1000);
             }
             g_dbg.gp.cycles = dsp_get_cycle_count(d->gp.dsp);
-
-            for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-                uint32_t l = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + i);
-                uint32_t r = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + 0x20 + i);
-                gp_left[i] = int24_to_float(l);
-                gp_right[i] = int24_to_float(r);
-            }
+            gp_ran = true;
         }
     } else {
-        /* Skip dsp_run(d->gp.dsp) completely: zero GP CPU overhead */
+        if (run_gp_handshake &&
+            (d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPRST) &&
+            (d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPDSPRST)) {
+            s_gp_handshake_subframes--;
+            dsp_start_frame(d->gp.dsp);
+            dsp_set_halt_requested(d->gp.dsp, false);
+            dsp_set_cycle_count(d->gp.dsp, 0);
+            while (!dsp_get_halt_requested(d->gp.dsp) &&
+                   dsp_get_cycle_count(d->gp.dsp) < 20000) {
+                dsp_run(d->gp.dsp, 1000);
+            }
+            g_dbg.gp.cycles = dsp_get_cycle_count(d->gp.dsp);
+        }
+
+        /* Skip dsp_run(d->gp.dsp) in steady-state: zero GP CPU overhead */
         hle_freeverb_set_params(&s_freeverb, g_config.audio.freeverb_roomsize,
                                 g_config.audio.freeverb_damp,
                                 g_config.audio.freeverb_wet, 1.0f);
@@ -538,23 +586,81 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
                                       wet_rl, wet_rr);
     }
 
+    bool gp_modified_bin[NUM_MIXBINS] = { false };
+    bool gp_has_audio[6] = { false };
+    float gp_ch[6][NUM_SAMPLES_PER_FRAME] = { 0 };
+
+    if (lle_dsp && gp_ran) {
+        for (int m = 0; m < NUM_MIXBINS; m++) {
+            uint32_t base = GP_DSP_MIXBUF_BASE + m * NUM_SAMPLES_PER_FRAME;
+            for (int s = 0; s < NUM_SAMPLES_PER_FRAME; s++) {
+                uint32_t cur_val = dsp_read_memory(d->gp.dsp, 'X', base + s);
+                if (cur_val != orig_mixbuf[m][s]) {
+                    gp_modified_bin[m] = true;
+                }
+                if (m < 6) {
+                    float f = int24_to_float(cur_val);
+                    gp_ch[m][s] = f;
+                    if (fabsf(f) > 1e-6f) {
+                        gp_has_audio[m] = true;
+                    }
+                }
+            }
+        }
+    }
+
     /* Step B — Assemble the 6-Channel Internal Frame ch6[32][6] (FL, FR, FC, LFE, RL, RR) */
     float ch6[NUM_SAMPLES_PER_FRAME][6];
-    for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-        if (lle_dsp) {
-            ch6[i][0] = mixbins[0][i] + gp_left[i];
-            ch6[i][1] = mixbins[1][i] + gp_right[i];
-            ch6[i][2] = mixbins[2][i];
-            ch6[i][3] = mixbins[3][i];
-            ch6[i][4] = mixbins[4][i];
-            ch6[i][5] = mixbins[5][i];
-        } else {
+    if (lle_dsp && gp_ran) {
+        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+            for (int b = 0; b < 6; b++) {
+                if (gp_modified_bin[b] && gp_has_audio[b]) {
+                    ch6[i][b] = gp_ch[b][i];
+                } else {
+                    ch6[i][b] = mixbins[b][i];
+                }
+            }
+        }
+    } else if (lle_dsp && !gp_ran) {
+        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+            for (int b = 0; b < 6; b++) {
+                ch6[i][b] = mixbins[b][i];
+            }
+        }
+    } else {
+        /* HLE Mode */
+        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
             ch6[i][0] = mixbins[0][i] + wet_fl[i];
             ch6[i][1] = mixbins[1][i] + wet_fr[i];
             ch6[i][2] = mixbins[2][i];
             ch6[i][3] = mixbins[3][i];
             ch6[i][4] = mixbins[4][i] + wet_rl[i];
             ch6[i][5] = mixbins[5][i] + wet_rr[i];
+        }
+    }
+
+    /* Unify 3D HRTF Submix Accumulation across both LLE and HLE modes */
+    static const int corner_to_ch6[4] = { 0, 1, 4, 5 }; /* 0=FL, 1=FR, 2=RL, 3=RR */
+    for (int k = 0; k < 4; k++) {
+        uint8_t sb = d->vp.hrtf_submix[k] & 0x1F;
+        if (sb >= 6 && sb < 31) {
+            /* If rear channels share the same submix bin as front channels,
+             * skip rear accumulation to avoid double-summing into the same stereo stage */
+            if ((k == 2 && sb == (d->vp.hrtf_submix[0] & 0x1F)) ||
+                (k == 3 && sb == (d->vp.hrtf_submix[1] & 0x1F))) {
+                continue;
+            }
+            int ch = corner_to_ch6[k];
+            for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                ch6[i][ch] += mixbins[sb][i];
+            }
+        }
+    }
+
+    /* Apply soft-knee saturation on ch6 to prevent harsh digital clipping */
+    for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+        for (int b = 0; b < 6; b++) {
+            ch6[i][b] = soft_clip(ch6[i][b]);
         }
     }
 
@@ -581,8 +687,10 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
         /* Case 4: EEPROM = Stereo (Speakers or Headphones) */
         if (lle_dsp) {
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-                d->monitor.frame_buf[off + i][0] = float_to_s16(clampf(gp_left[i], -1.0f, 1.0f));
-                d->monitor.frame_buf[off + i][1] = float_to_s16(clampf(gp_right[i], -1.0f, 1.0f));
+                float l = ch6[i][0] + 0.7071f * ch6[i][2] + 0.7071f * ch6[i][4];
+                float r = ch6[i][1] + 0.7071f * ch6[i][2] + 0.7071f * ch6[i][5];
+                d->monitor.frame_buf[off + i][0] = float_to_s16(clampf(soft_clip(l), -1.0f, 1.0f));
+                d->monitor.frame_buf[off + i][1] = float_to_s16(clampf(soft_clip(r), -1.0f, 1.0f));
             }
         } else {
             hle_stereo_pure_downmix_subframe(ch6, &d->monitor.frame_buf[off]);
@@ -649,6 +757,8 @@ void mcpx_apu_dsp_init(MCPXAPUState *d)
     dsp_set_halt_requested(d->ep.dsp, false);
     dsp_set_cycle_count(d->ep.dsp, 0);
     dsp_bootstrap(d->ep.dsp);
+
+    s_gp_handshake_subframes = 64;
 
     /* Until DSP is more performant, a switch to decide whether or not we should
      * use the full audio pipeline or not.

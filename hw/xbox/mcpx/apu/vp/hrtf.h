@@ -72,7 +72,7 @@ hrtf_filter_set_target_params(HrtfFilter *f, float hrir_coeff[2][HRTF_NUM_TAPS],
             s += fabsf(coeff[k]);
         }
         if (s == 0.0f || s == 1.0f) {
-            break;
+            continue;
         }
         for (int k = 0; k < HRTF_NUM_TAPS; k++) {
             coeff[k] /= s;

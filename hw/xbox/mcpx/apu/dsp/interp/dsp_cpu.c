@@ -685,12 +685,12 @@ void dsp56k_execute_instruction(dsp_core_t* dsp)
     dsp_postexecute_update_pc(dsp);
 
     /* Centralized Spin-Wait Evaluation */
-    if (dsp->pc == entry_pc && !dsp->loop_rep &&
-        !((dsp->registers[DSP_REG_SR] & (1 << DSP_SR_LF)) &&
-          !(dsp->registers[DSP_REG_SR] & (1 << DSP_SR_FV)))) {
+    bool in_finite_do = (dsp->registers[DSP_REG_SR] & (1 << DSP_SR_LF)) &&
+                        !(dsp->registers[DSP_REG_SR] & (1 << DSP_SR_FV));
+    if (dsp->pc == entry_pc && !dsp->loop_rep && !in_finite_do) {
         if (entry_pc == dsp->last_spin_pc) {
             dsp->spin_count++;
-            if (dsp->spin_count >= 4) {
+            if (dsp->spin_count >= 16) {
                 dsp->is_idle = true;
                 if (dsp->opaque) {
                     dsp_set_halt_requested((DSPState *)dsp->opaque, true);
