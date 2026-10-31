@@ -343,6 +343,10 @@ static uint64_t gp_read(void *opaque, hwaddr addr, unsigned int size)
     assert(size == 4);
     assert(addr % 4 == 0);
 
+    if (!g_config.audio.use_dsp && s_gp_handshake_subframes < 8) {
+        s_gp_handshake_subframes = 8;
+    }
+
     uint64_t r = 0;
     switch (addr) {
     case NV_PAPU_GPXMEM ... NV_PAPU_GPXMEM + 0x1000 * 4 - 1: {
@@ -388,6 +392,12 @@ static void gp_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     assert(addr % 4 == 0);
 
     DPRINTF("mcpx apu GP: [0x%" HWADDR_PRIx "] = 0x%lx\n", addr, val);
+
+    if (addr != NV_PAPU_GPRST) {
+        if (!g_config.audio.use_dsp && s_gp_handshake_subframes < 8) {
+            s_gp_handshake_subframes = 8;
+        }
+    }
 
     switch (addr) {
     case NV_PAPU_GPXMEM ... NV_PAPU_GPXMEM + 0x1000 * 4 - 1: {
@@ -523,7 +533,7 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
 {
     bool lle_dsp = g_config.audio.use_dsp;
     bool is_headphones = (g_config.audio.endpoint_mode == 1);
-    bool run_gp_handshake = (!lle_dsp && s_gp_handshake_subframes > 0);
+    bool run_gp_handshake = (!lle_dsp && (s_gp_handshake_subframes > 0 || (d->ep_frame_div & 31) == 0));
 
     uint32_t orig_mixbuf[NUM_MIXBINS][NUM_SAMPLES_PER_FRAME] = { 0 };
 
@@ -567,12 +577,14 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
         if (run_gp_handshake &&
             (d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPRST) &&
             (d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPDSPRST)) {
-            s_gp_handshake_subframes--;
+            if (s_gp_handshake_subframes > 0) {
+                s_gp_handshake_subframes--;
+            }
             dsp_start_frame(d->gp.dsp);
             dsp_set_halt_requested(d->gp.dsp, false);
             dsp_set_cycle_count(d->gp.dsp, 0);
             while (!dsp_get_halt_requested(d->gp.dsp) &&
-                   dsp_get_cycle_count(d->gp.dsp) < 20000) {
+                   dsp_get_cycle_count(d->gp.dsp) < GP_MAX_SUBFRAME_CYCLES) {
                 dsp_run(d->gp.dsp, 1000);
             }
             g_dbg.gp.cycles = dsp_get_cycle_count(d->gp.dsp);
