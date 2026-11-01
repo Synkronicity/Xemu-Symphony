@@ -1488,7 +1488,7 @@ static void voice_process(MCPXAPUState *d,
                        ? (float)(1 << d->vp.hrtf_headroom)
                        : (float)(1 << d->vp.submix_headroom[bin[b]]);
         g *= attenuate(vol[b]) / hr;
-        unsigned int sample_ch = (use_hrtf && (b < 4)) ? (b & 1) : (b % channels);
+        unsigned int sample_ch = (use_hrtf && (b < 4)) ? (b >> 1) : (b % channels);
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
             mixbins[bin[b]][i] += g * samples[i][sample_ch];
         }

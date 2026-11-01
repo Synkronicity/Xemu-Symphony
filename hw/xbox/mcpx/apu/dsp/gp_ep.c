@@ -652,14 +652,14 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
     }
 
     /* Unify 3D HRTF Submix Accumulation across both LLE and HLE modes */
-    static const int corner_to_ch6[4] = { 0, 1, 4, 5 }; /* 0=FL, 1=FR, 2=RL, 3=RR */
+    static const int corner_to_ch6[4] = { 0, 4, 1, 5 }; /* 0=FL, 1=RL, 2=FR, 3=RR */
     for (int k = 0; k < 4; k++) {
         uint8_t sb = d->vp.hrtf_submix[k] & 0x1F;
         if (sb >= 6 && sb < 31) {
             /* If rear channels share the same submix bin as front channels,
              * skip rear accumulation to avoid double-summing into the same stereo stage */
-            if ((k == 2 && sb == (d->vp.hrtf_submix[0] & 0x1F)) ||
-                (k == 3 && sb == (d->vp.hrtf_submix[1] & 0x1F))) {
+            if ((k == 1 && sb == (d->vp.hrtf_submix[0] & 0x1F)) ||
+                (k == 3 && sb == (d->vp.hrtf_submix[2] & 0x1F))) {
                 continue;
             }
             int ch = corner_to_ch6[k];
