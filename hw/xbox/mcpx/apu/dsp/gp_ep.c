@@ -26,6 +26,7 @@
 
 #define EP_SUBFRAME_CYCLES 12800
 #define GP_MAX_SUBFRAME_CYCLES 100000
+#define GP_LLE_FX_GAIN 0.35f
 
 static const int16_t ep_silence[256][2] = { 0 };
 
@@ -42,17 +43,6 @@ static inline float clampf(float v, float min_val, float max_val)
         return max_val;
     }
     return v;
-}
-
-static inline float soft_clip(float v)
-{
-    float av = fabsf(v);
-    if (av <= 0.90f) {
-        return v;
-    }
-    float excess = av - 0.90f;
-    float mag = 0.90f + 0.10f * (excess / (excess + 0.10f));
-    return (v < 0.0f) ? -mag : mag;
 }
 
 static inline int16_t float_to_s16(float v)
@@ -627,7 +617,8 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
             for (int b = 0; b < 6; b++) {
                 if (gp_modified_bin[b] && gp_has_audio[b]) {
-                    ch6[i][b] = gp_ch[b][i];
+                    float gp_fx = gp_ch[b][i] - mixbins[b][i];
+                    ch6[i][b] = mixbins[b][i] + GP_LLE_FX_GAIN * gp_fx;
                 } else {
                     ch6[i][b] = mixbins[b][i];
                 }
@@ -653,6 +644,7 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
 
     /* Unify 3D HRTF Submix Accumulation across both LLE and HLE modes */
     static const int corner_to_ch6[4] = { 0, 4, 1, 5 }; /* 0=FL, 1=RL, 2=FR, 3=RR */
+    float submix_gain = (lle_dsp && gp_ran) ? (1.0f - GP_LLE_FX_GAIN) : 1.0f;
     for (int k = 0; k < 4; k++) {
         uint8_t sb = d->vp.hrtf_submix[k] & 0x1F;
         if (sb >= 6 && sb < 31) {
@@ -664,15 +656,8 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
             }
             int ch = corner_to_ch6[k];
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-                ch6[i][ch] += mixbins[sb][i];
+                ch6[i][ch] += submix_gain * mixbins[sb][i];
             }
-        }
-    }
-
-    /* Apply soft-knee saturation on ch6 to prevent harsh digital clipping */
-    for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-        for (int b = 0; b < 6; b++) {
-            ch6[i][b] = soft_clip(ch6[i][b]);
         }
     }
 
@@ -701,8 +686,8 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
                 float l = ch6[i][0] + 0.7071f * ch6[i][2] + 0.7071f * ch6[i][4];
                 float r = ch6[i][1] + 0.7071f * ch6[i][2] + 0.7071f * ch6[i][5];
-                d->monitor.frame_buf[off + i][0] = float_to_s16(clampf(soft_clip(l), -1.0f, 1.0f));
-                d->monitor.frame_buf[off + i][1] = float_to_s16(clampf(soft_clip(r), -1.0f, 1.0f));
+                d->monitor.frame_buf[off + i][0] = float_to_s16(clampf(l, -1.0f, 1.0f));
+                d->monitor.frame_buf[off + i][1] = float_to_s16(clampf(r, -1.0f, 1.0f));
             }
         } else {
             hle_stereo_pure_downmix_subframe(ch6, &d->monitor.frame_buf[off]);
