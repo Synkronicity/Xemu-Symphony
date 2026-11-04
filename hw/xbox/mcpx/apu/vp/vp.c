@@ -1449,7 +1449,7 @@ static void voice_process(MCPXAPUState *d,
                                      NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
     }
     bool use_hrtf = (v < MCPX_HW_MAX_3D_VOICES) && !stereo &&
-                    (hrtf_handle != HRTF_NULL_HANDLE) && g_config.audio.hrtf;
+                    (hrtf_handle != HRTF_NULL_HANDLE);
 
     if (use_hrtf) {
         bin[0] = d->vp.hrtf_submix[0];
@@ -1618,7 +1618,7 @@ static void get_voice_bin_src_dst(MCPXAPUState *d, int v,
                                      NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
     }
     bool use_hrtf = (v < MCPX_HW_MAX_3D_VOICES) && !stereo &&
-                    (hrtf_handle != HRTF_NULL_HANDLE) && g_config.audio.hrtf;
+                    (hrtf_handle != HRTF_NULL_HANDLE);
 
     int bin[8];
     if (use_hrtf) {
