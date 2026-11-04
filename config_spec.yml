@@ -315,7 +315,7 @@ audio:
       default: 0  # 0 = auto
   use_dsp:
     type: bool
-    default: true
+    default: false
   hrtf:
     type: bool
     default: true

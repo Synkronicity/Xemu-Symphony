@@ -644,7 +644,7 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
     if (lle_dsp && gp_ran) {
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
             for (int b = 0; b < 6; b++) {
-                if (gp_modified_bin[b] && gp_has_audio[b]) {
+                if (b < 2 && gp_modified_bin[b] && gp_has_audio[b]) {
                     float gp_fx = gp_ch[b][i] - mixbins[b][i];
                     ch6[i][b] = mixbins[b][i] + GP_LLE_FX_GAIN * gp_fx;
                 } else {

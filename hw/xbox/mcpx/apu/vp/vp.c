@@ -92,10 +92,11 @@ static float clampf(float v, float min, float max)
     }
 }
 
+static float s_attenuation_table[4096];
+
 static float attenuate(uint16_t vol)
 {
-    vol &= 0xFFF;
-    return (vol == 0xFFF) ? 0.0 : powf(10.0f, vol/(64.0 * -20.0f));
+    return s_attenuation_table[vol & 0xFFF];
 }
 
 static uint32_t voice_get_mask(MCPXAPUState *d, uint16_t voice_handle,
@@ -1462,13 +1463,15 @@ static void voice_process(MCPXAPUState *d,
             int16_t fc = voice_get_mask(
                 d, v, NV_PAVS_VOICE_TAR_FCA + (ch % channels) * 4,
                 NV_PAVS_VOICE_TAR_FCA_FC0);
-            float fc_f = clampf(pow(2, fc / 4096.0), 0.003906f, 1.0f);
             uint16_t q = voice_get_mask(
                 d, v, NV_PAVS_VOICE_TAR_FCA + (ch % channels) * 4,
                 NV_PAVS_VOICE_TAR_FCA_FC1);
-            float q_f = clampf(q / (1.0 * 0x8000), 0.079407f, 1.0f);
             sv_filter *filter = &d->vp.filters[v].svf[ch];
-            setup_svf(filter, fc_f, q_f, F_LP);
+            if (svf_config_update(filter, fc, q)) {
+                float fc_f = clampf(pow(2, fc / 4096.0), 0.003906f, 1.0f);
+                float q_f = clampf(q / (1.0 * 0x8000), 0.079407f, 1.0f);
+                setup_svf(filter, fc_f, q_f, F_LP);
+            }
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
                 samples[i][ch] = run_svf(filter, samples[i][ch]);
                 samples[i][ch] = fmin(fmax(samples[i][ch], -1.0), 1.0);
@@ -1663,6 +1666,7 @@ static void *voice_worker_thread(void *arg)
         qemu_cond_wait(&vwd->work_pending, &vwd->lock);
     } while (!vwd->workers_should_exit);
 
+    qemu_mutex_unlock(&vwd->lock);
     rcu_unregister_thread();
     return NULL;
 }
@@ -1889,6 +1893,14 @@ void mcpx_apu_vp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_P
 
 void mcpx_apu_vp_init(MCPXAPUState *d)
 {
+    static bool table_initialized = false;
+    if (!table_initialized) {
+        for (int vol = 0; vol < 4095; vol++) {
+            s_attenuation_table[vol] = powf(10.0f, vol / (64.0f * -20.0f));
+        }
+        s_attenuation_table[4095] = 0.0f;
+        table_initialized = true;
+    }
     voice_work_init(d);
 }
 
@@ -1910,5 +1922,6 @@ void mcpx_apu_vp_reset(MCPXAPUState *d)
     memset(d->vp.voice_locked, 0, sizeof(d->vp.voice_locked));
     for (int v = 0; v < ARRAY_SIZE(d->vp.filters); v++) {
         hrtf_filter_init(&d->vp.filters[v].hrtf);
+        memset(d->vp.filters[v].svf, 0, sizeof(d->vp.filters[v].svf));
     }
 }

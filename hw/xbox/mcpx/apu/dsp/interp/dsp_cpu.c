@@ -695,7 +695,6 @@ void dsp56k_execute_instruction(dsp_core_t* dsp)
                 if (dsp->opaque) {
                     dsp_set_halt_requested((DSPState *)dsp->opaque, true);
                 }
-                dsp->spin_count = 0;
             }
         } else {
             dsp->last_spin_pc = entry_pc;

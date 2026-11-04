@@ -7002,7 +7002,7 @@ static void emu_do_ea(dsp_core_t* dsp)
     uint32_t addr;
     emu_calc_ea(dsp, ea_mode, &addr);
     uint32_t lc = dsp56k_read_memory(dsp, memspace, addr) & BITMASK(24);
-    uint32_t la = read_memory_p(dsp, dsp->pc + 1) & BITMASK(24);
+    uint32_t la = read_memory_p(dsp, dsp->pc + dsp->cur_inst_len) & BITMASK(24);
     dsp->cur_inst_len++;
 
     if (lc == 0) {
@@ -7125,7 +7125,7 @@ static void emu_dor_ea(dsp_core_t* dsp)
     uint32_t ea_mode = (dsp->cur_inst >> 8) & BITMASK(6);
     uint32_t addr;
     emu_calc_ea(dsp, ea_mode, &addr);
-    uint32_t xxxx = read_memory_p(dsp, dsp->pc + 1);
+    uint32_t xxxx = read_memory_p(dsp, dsp->pc + dsp->cur_inst_len);
     dsp->cur_inst_len++;
     uint32_t lc = dsp56k_read_memory(dsp, memspace, addr) & BITMASK(24);
 
