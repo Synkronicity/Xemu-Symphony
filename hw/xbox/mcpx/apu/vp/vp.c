@@ -22,6 +22,8 @@
 
 #include "hw/xbox/mcpx/apu/apu_int.h"
 #include "adpcm.h"
+#include "sge.h"
+#include "resample.h"
 
 static const struct {
     hwaddr top, current, next;
@@ -52,14 +54,18 @@ static void set_notify_status(MCPXAPUState *d, uint32_t v, int notifier,
     d->set_irq = true;
 }
 
+static void voice_destroy_resampler(MCPXAPUVoiceFilter *filter)
+{
+    mcpx_apu_resampler_destroy(&filter->resampler, &filter->resampler_channels);
+}
+
 static void voice_reset_filters(MCPXAPUState *d, uint16_t v)
 {
     assert(v < MCPX_HW_MAX_VOICES);
     memset(&d->vp.filters[v].svf, 0, sizeof(d->vp.filters[v].svf));
     hrtf_filter_clear_history(&d->vp.filters[v].hrtf);
-    if (d->vp.filters[v].resampler) {
-        src_reset(d->vp.filters[v].resampler);
-    }
+    mcpx_apu_adpcm_cache_reset(&d->vp.filters[v].adpcm_cache);
+    voice_destroy_resampler(&d->vp.filters[v]);
 }
 
 static bool voice_should_mute(uint16_t v)
@@ -92,10 +98,11 @@ static float clampf(float v, float min, float max)
     }
 }
 
+static float s_attenuation_table[4096];
+
 static float attenuate(uint16_t vol)
 {
-    vol &= 0xFFF;
-    return (vol == 0xFFF) ? 0.0 : powf(10.0f, vol/(64.0 * -20.0f));
+    return s_attenuation_table[vol & 0xFFF];
 }
 
 static uint32_t voice_get_mask(MCPXAPUState *d, uint16_t voice_handle,
@@ -665,16 +672,19 @@ const MemoryRegionOps vp_ops = {
     .write = vp_write,
 };
 
-static hwaddr get_data_ptr(hwaddr sge_base, unsigned int max_sge, uint32_t addr)
+static hwaddr get_data_ptr(hwaddr sge_base, unsigned int max_sge, uint32_t addr,
+                           MCPXAPUSGETranslationCache *cache)
 {
     unsigned int entry = addr / TARGET_PAGE_SIZE;
-    assert(entry <= max_sge);
-    uint32_t prd_address =
-        ldl_le_phys(&address_space_memory, sge_base + entry * 4 * 2);
-    // uint32_t prd_control =
-    //     ldl_le_phys(&address_space_memory, sge_base + entry * 4 * 2 + 4);
+    if (entry > max_sge) {
+        DPRINTF("get_data_ptr: entry %u > max_sge %u (addr 0x%08X)\n",
+                entry, max_sge, addr);
+        return 0;
+    }
+    uint32_t prd_address = mcpx_apu_sge_read_descriptor(
+        cache, sge_base + entry * 4 * 2);
     DPRINTF("Addr: 0x%08X, control: 0x%08X\n", prd_address, prd_control);
-    return prd_address + addr % TARGET_PAGE_SIZE;
+    return prd_address + (addr & (TARGET_PAGE_SIZE - 1));
 }
 
 static float voice_step_envelope(MCPXAPUState *d, uint16_t v, uint32_t reg_0,
@@ -887,8 +897,10 @@ static int voice_get_samples(MCPXAPUState *d, uint32_t v, float samples[][2],
     size_t block_size;
 
     int adpcm_block_index = -1;
-    uint32_t adpcm_block[36*2/4];
-    int16_t adpcm_decoded[65*2]; // FIXME: Move out of here
+    uint32_t adpcm_block[MCPX_ADPCM_MAX_BLOCK_BYTES / sizeof(uint32_t)];
+    const int16_t *adpcm_decoded = NULL;
+    int adpcm_decoded_samples = 0;
+    g_auto(MCPXAPUSGETranslationCache) sge_cache = { 0 };
 
     // FIXME: Only update if necessary
     struct McpxApuDebugVoice *dbg = &g_dbg.vp.v[v];
@@ -1007,6 +1019,12 @@ static int voice_get_samples(MCPXAPUState *d, uint32_t v, float samples[][2],
     DPRINTF("CBO=%d EBO=%d\n", cbo, ebo);
 
     block_size *= samples_per_block;
+    if (adpcm &&
+        (block_size > sizeof(adpcm_block) ||
+         !mcpx_apu_adpcm_fits_cache(block_size, channels))) {
+        mcpx_apu_adpcm_cache_reset(&d->vp.filters[v].adpcm_cache);
+        return -1;
+    }
 
     // FIXME: Restructure this loop
     int sample_count = 0;
@@ -1034,15 +1052,22 @@ static int voice_get_samples(MCPXAPUState *d, uint32_t v, float samples[][2],
                     for (unsigned int word_index = 0;
                          word_index < (9 * samples_per_block); word_index++) {
                         hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR],
-                                                   0xFFFFFFFF, linear_addr);
+                                                   0xFFFFFFFF, linear_addr,
+                                                   &sge_cache);
                         adpcm_block[word_index] =
                             ldl_le_phys(&address_space_memory, addr);
                         linear_addr += 4;
                     }
                 }
-                adpcm_decode_block(adpcm_decoded, (uint8_t *)adpcm_block,
-                                   block_size, channels);
+                adpcm_decoded = mcpx_apu_adpcm_decode_cached(
+                    &d->vp.filters[v].adpcm_cache, (uint8_t *)adpcm_block,
+                    block_size, channels, &adpcm_decoded_samples, NULL);
                 adpcm_block_index = block_index;
+            }
+
+            if (adpcm_decoded == NULL || adpcm_decoded_samples <= 0 ||
+                block_position >= (unsigned int)adpcm_decoded_samples) {
+                goto adpcm_invalid;
             }
 
             samples[sample_count][0] =
@@ -1060,7 +1085,7 @@ static int voice_get_samples(MCPXAPUState *d, uint32_t v, float samples[][2],
             } else {
                 uint32_t linear_addr = ba + cbo * block_size;
                 addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF,
-                                    linear_addr);
+                                    linear_addr, &sge_cache);
             }
 
             uint64_t ram_size = memory_region_size(d->ram);
@@ -1131,6 +1156,10 @@ static int voice_get_samples(MCPXAPUState *d, uint32_t v, float samples[][2],
     voice_set_mask(d, v, NV_PAVS_VOICE_PAR_OFFSET,
                    NV_PAVS_VOICE_PAR_OFFSET_CBO, cbo);
     return sample_count;
+
+adpcm_invalid:
+    mcpx_apu_adpcm_cache_reset(&d->vp.filters[v].adpcm_cache);
+    return -1;
 }
 
 static long voice_resample_callback(void *cb_data, float **data)
@@ -1163,18 +1192,31 @@ static long voice_resample_callback(void *cb_data, float **data)
         sample_count = NUM_SAMPLES_PER_FRAME;
     }
 
-    *data = filter->resample_buf;
+    if (filter->resampler_channels == 1) {
+        mcpx_apu_pack_mono_samples((const float (*)[2])filter->resample_buf,
+                                   filter->mono_resample_buf,
+                                   NUM_SAMPLES_PER_FRAME);
+        *data = filter->mono_resample_buf;
+    } else {
+        *data = filter->resample_buf;
+    }
     return sample_count;
 }
 
 static int voice_resample(MCPXAPUState *d, uint16_t v, float samples[][2],
-                          int requested_num, float rate)
+                          int requested_num, float rate, bool stereo)
 {
     assert(v < MCPX_HW_MAX_VOICES);
     MCPXAPUVoiceFilter *filter = &d->vp.filters[v];
+    int channels = stereo ? 2 : 1;
+
+    if (filter->resampler != NULL && filter->resampler_channels != channels) {
+        voice_destroy_resampler(filter);
+    }
 
     if (filter->resampler == NULL) {
         filter->voice = v;
+        filter->resampler_channels = channels;
         int err;
 
         /* Note: Using a sinc based resampler for quality. Unsure about
@@ -1182,17 +1224,27 @@ static int voice_resample(MCPXAPUState *d, uint16_t v, float samples[][2],
          * which case using this resampler is overkill, but quality is good
          * so use it for now.
          */
-        // FIXME: Don't do 2ch resampling if this is a mono voice
         filter->resampler = src_callback_new(&voice_resample_callback,
-                                           SRC_SINC_FASTEST, 2, &err, filter);
+                                             SRC_SINC_FASTEST, channels, &err,
+                                             filter);
         if (filter->resampler == NULL) {
             fprintf(stderr, "src error: %s\n", src_strerror(err));
             assert(0);
         }
     }
 
-    int count = src_callback_read(filter->resampler, rate, requested_num,
+    int count;
+    if (channels == 1) {
+        float mono_samples[NUM_SAMPLES_PER_FRAME];
+        count = src_callback_read(filter->resampler, rate, requested_num,
+                                  mono_samples);
+        if (count > 0) {
+            mcpx_apu_expand_mono_samples(mono_samples, samples, count);
+        }
+    } else {
+        count = src_callback_read(filter->resampler, rate, requested_num,
                                   (float *)samples);
+    }
     if (count == -1) {
         DPRINTF("resample error\n");
     }
@@ -1358,7 +1410,8 @@ static void voice_process(MCPXAPUState *d,
             }
             int count =
                 voice_resample(d, v, &samples[sample_count],
-                               NUM_SAMPLES_PER_FRAME - sample_count, rate);
+                               NUM_SAMPLES_PER_FRAME - sample_count, rate,
+                               stereo);
             if (count < 0) {
                 break;
             }
@@ -1462,13 +1515,15 @@ static void voice_process(MCPXAPUState *d,
             int16_t fc = voice_get_mask(
                 d, v, NV_PAVS_VOICE_TAR_FCA + (ch % channels) * 4,
                 NV_PAVS_VOICE_TAR_FCA_FC0);
-            float fc_f = clampf(pow(2, fc / 4096.0), 0.003906f, 1.0f);
             uint16_t q = voice_get_mask(
                 d, v, NV_PAVS_VOICE_TAR_FCA + (ch % channels) * 4,
                 NV_PAVS_VOICE_TAR_FCA_FC1);
-            float q_f = clampf(q / (1.0 * 0x8000), 0.079407f, 1.0f);
             sv_filter *filter = &d->vp.filters[v].svf[ch];
-            setup_svf(filter, fc_f, q_f, F_LP);
+            if (svf_config_update(filter, fc, q)) {
+                float fc_f = clampf(pow(2, fc / 4096.0), 0.003906f, 1.0f);
+                float q_f = clampf(q / (1.0 * 0x8000), 0.079407f, 1.0f);
+                setup_svf(filter, fc_f, q_f, F_LP);
+            }
             for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
                 samples[i][ch] = run_svf(filter, samples[i][ch]);
                 samples[i][ch] = fmin(fmax(samples[i][ch], -1.0), 1.0);
@@ -1663,6 +1718,7 @@ static void *voice_worker_thread(void *arg)
         qemu_cond_wait(&vwd->work_pending, &vwd->lock);
     } while (!vwd->workers_should_exit);
 
+    qemu_mutex_unlock(&vwd->lock);
     rcu_unregister_thread();
     return NULL;
 }
@@ -1889,12 +1945,23 @@ void mcpx_apu_vp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_P
 
 void mcpx_apu_vp_init(MCPXAPUState *d)
 {
+    static bool table_initialized = false;
+    if (!table_initialized) {
+        for (int vol = 0; vol < 4095; vol++) {
+            s_attenuation_table[vol] = powf(10.0f, vol / (64.0f * -20.0f));
+        }
+        s_attenuation_table[4095] = 0.0f;
+        table_initialized = true;
+    }
     voice_work_init(d);
 }
 
 void mcpx_apu_vp_finalize(MCPXAPUState *d)
 {
     voice_work_finalize(d);
+    for (int v = 0; v < ARRAY_SIZE(d->vp.filters); v++) {
+        voice_destroy_resampler(&d->vp.filters[v]);
+    }
 }
 
 void mcpx_apu_vp_reset(MCPXAPUState *d)
@@ -1909,6 +1976,9 @@ void mcpx_apu_vp_reset(MCPXAPUState *d)
     memset(d->vp.submix_headroom, 0, sizeof(d->vp.submix_headroom));
     memset(d->vp.voice_locked, 0, sizeof(d->vp.voice_locked));
     for (int v = 0; v < ARRAY_SIZE(d->vp.filters); v++) {
+        voice_destroy_resampler(&d->vp.filters[v]);
+        mcpx_apu_adpcm_cache_reset(&d->vp.filters[v].adpcm_cache);
         hrtf_filter_init(&d->vp.filters[v].hrtf);
+        memset(d->vp.filters[v].svf, 0, sizeof(d->vp.filters[v].svf));
     }
 }

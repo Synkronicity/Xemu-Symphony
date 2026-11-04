@@ -30,6 +30,7 @@
 #include "hw/xbox/mcpx/apu/apu_regs.h"
 #include "svf.h"
 #include "hrtf.h"
+#include "adpcm.h"
 
 typedef struct MCPXAPUState MCPXAPUState;
 
@@ -43,7 +44,10 @@ typedef struct MCPXAPUVPSSLData {
 typedef struct MCPXAPUVoiceFilter {
     uint16_t voice;
     float resample_buf[NUM_SAMPLES_PER_FRAME * 2];
+    float mono_resample_buf[NUM_SAMPLES_PER_FRAME];
     SRC_STATE *resampler;
+    int resampler_channels;
+    MCPXADPCMBlockCache adpcm_cache;
     sv_filter svf[2];
     HrtfFilter hrtf;
 } MCPXAPUVoiceFilter;

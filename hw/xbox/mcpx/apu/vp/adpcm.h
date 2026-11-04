@@ -31,6 +31,21 @@
 #ifndef ADPCM_DECODE_H
 #define ADPCM_DECODE_H
 
+#include <string.h>
+
+#define MCPX_ADPCM_MAX_BLOCK_BYTES (36 * 2)
+#define MCPX_ADPCM_MAX_DECODED_SAMPLES (65 * 2)
+
+typedef struct MCPXADPCMBlockCache {
+    bool valid;
+    unsigned int channels;
+    size_t encoded_size;
+    /* Frames per channel valid in the interleaved decoded prefix. */
+    int sample_count;
+    uint8_t encoded[MCPX_ADPCM_MAX_BLOCK_BYTES];
+    int16_t decoded[MCPX_ADPCM_MAX_DECODED_SAMPLES];
+} MCPXADPCMBlockCache;
+
 /********************************* 4-bit ADPCM decoder ********************************/
 
 /* Decode the block of ADPCM data into PCM. This requires no context because ADPCM blocks
@@ -137,6 +152,77 @@ static int adpcm_decode_block (int16_t *outbuf, const uint8_t *inbuf, size_t inb
     }
 
     return samples;
+}
+
+static inline void mcpx_apu_adpcm_cache_reset(MCPXADPCMBlockCache *cache)
+{
+    cache->valid = false;
+}
+
+static inline bool mcpx_apu_adpcm_fits_cache(size_t encoded_size,
+                                              unsigned int channels)
+{
+    if (channels < 1 || channels > 2 ||
+        encoded_size > MCPX_ADPCM_MAX_BLOCK_BYTES) {
+        return false;
+    }
+
+    size_t header_bytes = 4u * channels;
+    if (encoded_size < header_bytes) {
+        return false;
+    }
+
+    size_t chunks = (encoded_size - header_bytes) / header_bytes;
+    size_t decoded_samples = channels * (1u + chunks * 8u);
+    return decoded_samples <= MCPX_ADPCM_MAX_DECODED_SAMPLES;
+}
+
+static inline const int16_t *mcpx_apu_adpcm_decode_cached(
+    MCPXADPCMBlockCache *cache, const uint8_t *encoded, size_t encoded_size,
+    unsigned int channels, int *sample_count, bool *cache_hit)
+{
+    /* sample_count is frames per channel. Only that decoded prefix is valid. */
+    if (!mcpx_apu_adpcm_fits_cache(encoded_size, channels)) {
+        mcpx_apu_adpcm_cache_reset(cache);
+        *sample_count = 0;
+        if (cache_hit) {
+            *cache_hit = false;
+        }
+        return NULL;
+    }
+
+    if (cache->valid && cache->channels == channels &&
+        cache->encoded_size == encoded_size &&
+        memcmp(cache->encoded, encoded, encoded_size) == 0) {
+        *sample_count = cache->sample_count;
+        if (cache_hit) {
+            *cache_hit = true;
+        }
+        return cache->decoded;
+    }
+
+    int count = adpcm_decode_block(cache->decoded, encoded, encoded_size,
+                                   channels);
+    if (count <= 0 ||
+        count * channels > MCPX_ADPCM_MAX_DECODED_SAMPLES) {
+        mcpx_apu_adpcm_cache_reset(cache);
+        *sample_count = 0;
+        if (cache_hit) {
+            *cache_hit = false;
+        }
+        return NULL;
+    }
+
+    memcpy(cache->encoded, encoded, encoded_size);
+    cache->channels = channels;
+    cache->encoded_size = encoded_size;
+    cache->sample_count = count;
+    cache->valid = true;
+    *sample_count = count;
+    if (cache_hit) {
+        *cache_hit = false;
+    }
+    return cache->decoded;
 }
 
 #endif

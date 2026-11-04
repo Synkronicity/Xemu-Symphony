@@ -11,6 +11,8 @@
 #define SVF_H
 
 #include <math.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 #define flush_to_zero(x) x
 
@@ -36,7 +38,21 @@ typedef struct {
     float p;     // peaking output (allpass with resonance)
     float n;     // notch output
     float *op;   // pointer to output value
+    int16_t config_fc;
+    uint16_t config_q;
+    bool config_valid;
 } sv_filter;
+
+static inline bool svf_config_update(sv_filter *sv, int16_t fc, uint16_t q)
+{
+    if (sv->config_valid && sv->config_fc == fc && sv->config_q == q) {
+        return false;
+    }
+    sv->config_fc = fc;
+    sv->config_q = q;
+    sv->config_valid = true;
+    return true;
+}
 
 /* Store data in SVF struct, takes the sampling frequency, cutoff frequency
    and Q, and fills in the structure passed */
