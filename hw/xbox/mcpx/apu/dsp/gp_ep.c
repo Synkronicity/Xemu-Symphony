@@ -203,7 +203,10 @@ static uint32_t circular_scatter_gather_rw(MCPXAPUState *d, hwaddr sge_base,
                 "length 0x%x / 0x%lx bytes\n",
                 dir ? "write" : "read", base, end, cur, bytes_to_copy, len);
 
-        assert((cur >= base) && ((cur + bytes_to_copy) <= end));
+        if (cur < base || cur >= end || (cur + bytes_to_copy) > end) {
+            cur = base;
+            break;
+        }
         scatter_gather_rw(d, sge_base, max_sge, ptr, cur, bytes_to_copy, dir);
 
         ptr += bytes_to_copy;
@@ -212,7 +215,6 @@ static uint32_t circular_scatter_gather_rw(MCPXAPUState *d, hwaddr sge_base,
         /* After the first iteration we might have to wrap */
         cur += bytes_to_copy;
         if (cur >= end) {
-            assert(cur == end);
             cur = base;
         }
     }
@@ -249,8 +251,12 @@ static void gp_fifo_rw(void *opaque, uint8_t *ptr, unsigned int index,
     //     dir ? "writing to" : "reading from", index,
     //     base, end, cur, len);
 
-    /* DSP hangs if current >= end; but forces current >= base */
-    assert(cur < end);
+    if (end <= base) {
+        return;
+    }
+    if (cur >= end) {
+        cur = base + ((cur - base) % (end - base));
+    }
     if (cur < base) {
         cur = base;
     }
@@ -555,8 +561,8 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
 
     uint32_t orig_mixbuf[NUM_MIXBINS][NUM_SAMPLES_PER_FRAME] = { 0 };
 
-    /* Write VP results to the GP DSP MIXBUF if LLE DSP is enabled */
-    if (lle_dsp) {
+    /* Write VP results to the GP DSP MIXBUF if GP DSP will execute this frame */
+    if (lle_dsp || run_gp_handshake) {
         for (int mixbin = 0; mixbin < NUM_MIXBINS; mixbin++) {
             uint32_t base = GP_DSP_MIXBUF_BASE + mixbin * NUM_SAMPLES_PER_FRAME;
             for (int sample = 0; sample < NUM_SAMPLES_PER_FRAME; sample++) {

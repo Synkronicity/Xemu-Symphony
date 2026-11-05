@@ -113,20 +113,18 @@ static void dsp_dma_run(DSPDMAState *s)
         uint32_t block_addr = 0;
         int block_space = DSP_SPACE_X;
 
-        if (addr < 0x1800) {
-            assert(addr+6 < 0x1800);
+        if (addr + 6 < 0x1800) {
             block_space = DSP_SPACE_X;
             block_addr = addr;
-        } else if (addr >= 0x1800 && addr < 0x2000) { //?
-            assert(addr+6 < 0x2000);
+        } else if (addr >= 0x1800 && addr + 6 < 0x2000) {
             block_space = DSP_SPACE_Y;
             block_addr = addr - 0x1800;
-        } else if (addr >= 0x2800 && addr < 0x3800) { //?
-            assert(addr+6 < 0x3800);
+        } else if (addr >= 0x2800 && addr + 6 < 0x3800) {
             block_space = DSP_SPACE_P;
             block_addr = addr - 0x2800;
         } else {
-            assert(!"Dsp dma space address out of range");
+            s->eol = true;
+            break;
         }
 
         uint32_t next_block = s->mem_read(s->mem_opaque, block_space, block_addr);
@@ -154,13 +152,12 @@ static void dsp_dma_run(DSPDMAState *s)
         bool     unk13                   = (control >> 13) & 1;
         // uint32_t dsp_step                = (control >> 14) & 0x3FF; // FIXME
 
-        /* Check for unhandled control settings */
-        assert(unk2 == 0x0);
-        assert(unk13 == false);
-
         /* Decode count for interleaved mode */
         uint32_t channel_count = (count & 0xF) + 1;
         uint32_t block_count = count >> 4;
+        uint32_t total_items = dsp_interleave ? (block_count * channel_count) : count;
+        (void)unk2;
+        (void)unk13;
 
         unsigned int item_size = 4;
         uint32_t item_mask = 0xffffffff;
@@ -191,34 +188,29 @@ static void dsp_dma_run(DSPDMAState *s)
         int mem_space = DSP_SPACE_X;
         bool is_zero_generator = ((dsp_offset & 0x4000) != 0 || dsp_offset >= 0x4000);
 
-        if (dsp_offset < 0x1800) {
-            assert(dsp_offset+count < 0x1800);
+        if (dsp_offset + total_items <= 0x1800) {
             mem_space = DSP_SPACE_X;
             mem_address = dsp_offset;
-        } else if (dsp_offset >= 0x1800 && dsp_offset < 0x2000) { //?
-            assert(dsp_offset+count < 0x2000);
+        } else if (dsp_offset >= 0x1800 && dsp_offset + total_items <= 0x2000) {
             mem_space = DSP_SPACE_Y;
             mem_address = dsp_offset - 0x1800;
-        } else if (dsp_offset >= 0x2800 && dsp_offset < 0x3800) { //?
-            assert(dsp_offset+count < 0x3800);
+        } else if (dsp_offset >= 0x2800 && dsp_offset + total_items <= 0x3800) {
             mem_space = DSP_SPACE_P;
             mem_address = dsp_offset - 0x2800;
         } else if (is_zero_generator) {
             mem_space = DSP_SPACE_X;
             mem_address = dsp_offset;
         } else {
-            fprintf(stderr, "Attempt to access %08x\n", dsp_offset);
-            assert(!"Dsp dma offset out of range");
+            continue;
         }
 
-        size_t transfer_size = count * item_size;
+        size_t transfer_size = total_items * item_size;
 
-        // FIXME: Remove this intermediate buffer
         static uint8_t *scratch_buf = NULL;
-        static ssize_t scratch_buf_size = -1;
-        if (count * item_size > scratch_buf_size) {
-            scratch_buf_size = count * item_size;
-            scratch_buf = malloc(scratch_buf_size);
+        static size_t scratch_buf_size = 0;
+        if (transfer_size > scratch_buf_size) {
+            scratch_buf_size = MAX(transfer_size, (size_t)4096);
+            scratch_buf = g_realloc(scratch_buf, scratch_buf_size);
         }
 
         if (direction) {
