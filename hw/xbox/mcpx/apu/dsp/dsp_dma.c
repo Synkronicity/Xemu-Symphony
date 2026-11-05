@@ -183,7 +183,14 @@ static void dsp_dma_run(DSPDMAState *s)
             break;
         }
 
-        size_t scratch_addr = scratch_base + scratch_offset;
+        uint32_t item_align_mask = ~(item_size - 1);
+        uint32_t aligned_scratch_base = scratch_base & item_align_mask;
+        uint32_t aligned_scratch_offset = scratch_offset & item_align_mask;
+        uint32_t aligned_scratch_size = scratch_size & item_align_mask;
+        if (aligned_scratch_size < item_size) {
+            aligned_scratch_size = item_size;
+        }
+        size_t scratch_addr = aligned_scratch_base + aligned_scratch_offset;
         uint32_t mem_address = 0;
         int mem_space = DSP_SPACE_X;
         bool is_zero_generator = ((dsp_offset & 0x4000) != 0 || dsp_offset >= 0x4000);
@@ -264,7 +271,7 @@ static void dsp_dma_run(DSPDMAState *s)
                 s->fifo_rw(s->rw_opaque, scratch_buf, buf_id, transfer_size, 1);
                 break;
             case 0xE:
-                scratch_circular_copy(s, scratch_base, &scratch_offset, scratch_size, transfer_size, scratch_buf, 1);
+                scratch_circular_copy(s, aligned_scratch_base, &aligned_scratch_offset, aligned_scratch_size, transfer_size, scratch_buf, 1);
                 break;
             case 0xF:
                 s->scratch_rw(s->rw_opaque, scratch_buf, scratch_addr, transfer_size, 1);
@@ -278,7 +285,7 @@ static void dsp_dma_run(DSPDMAState *s)
             assert(!dsp_interleave);
 
             if (buf_id == 0xe) {
-                scratch_circular_copy(s, scratch_base, &scratch_offset, scratch_size, transfer_size, scratch_buf, 0);
+                scratch_circular_copy(s, aligned_scratch_base, &aligned_scratch_offset, aligned_scratch_size, transfer_size, scratch_buf, 0);
             } else if (buf_id == 0xf) {
                 s->scratch_rw(s->rw_opaque, scratch_buf, scratch_addr, transfer_size, 0);
             } else {
@@ -308,7 +315,7 @@ static void dsp_dma_run(DSPDMAState *s)
         }
 
         if (buffer_offset_writeback) {
-            s->mem_write(s->mem_opaque, block_space, block_addr+4, scratch_offset);
+            s->mem_write(s->mem_opaque, block_space, block_addr+4, aligned_scratch_offset);
         }
 
     }
