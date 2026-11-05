@@ -229,9 +229,11 @@ DSPState *dsp_init(void *rw_opaque, dsp_scratch_rw_func scratch_rw,
      * on first call. */
     dsp56k_reset_cpu(core);
 
-    memset(core->pram, 0xCA, DSP_PRAM_SIZE * sizeof(uint32_t));
-    memset(core->xram, 0xCA, DSP_XRAM_SIZE * sizeof(uint32_t));
-    memset(core->yram, 0xCA, DSP_YRAM_SIZE * sizeof(uint32_t));
+    for (int i = 0; i < DSP_PRAM_SIZE; i++) {
+        core->pram[i] = 0x00CACACA;
+    }
+    memset(core->xram, 0, DSP_XRAM_SIZE * sizeof(uint32_t));
+    memset(core->yram, 0, DSP_YRAM_SIZE * sizeof(uint32_t));
     dsp_invalidate_opcache(dsp);
 
     dsp_reset(dsp);
