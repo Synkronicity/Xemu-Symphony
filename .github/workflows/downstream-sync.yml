@@ -117,7 +117,7 @@ jobs:
       - name: Checkout Downstream Branch
         uses: actions/checkout@v4
         with:
-          ref: feature/xemu-dsp56362
+          ref: master
           fetch-depth: 0
           submodules: recursive
 
@@ -266,7 +266,7 @@ jobs:
       - name: Checkout Code to Move Canary Tag
         uses: actions/checkout@v4
         with:
-          ref: feature/xemu-dsp56362
+          ref: master
 
       - name: Force Update Canary Tag
         run: |
@@ -295,7 +295,7 @@ jobs:
           body: |
             Automated downstream build of Xemu Symphony.
             
-            - Built automatically from branch: `feature/xemu-dsp56362`
+            - Built automatically from branch: `master`
             - Commit: ${{ github.sha }}
             - Upstream synchronization: Verified clean APU merge-base
           files: |
