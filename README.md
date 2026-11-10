@@ -1,37 +1,41 @@
 # Xemu Symphony
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](#license--attribution)
+[![Release: General Release 1](https://img.shields.io/badge/Release-release1-brightgreen.svg)](#roadmap--release-history)
 [![Audio: True 5.1 Surround & 3D Headphones](https://img.shields.io/badge/Audio-5.1%20LPCM%20%7C%203D%20Binaural%20HRTF-orange.svg)](#quick-start-pick-your-setup)
 [![Architecture: MCPX APU DSP56362](https://img.shields.io/badge/Hardware-MCPX%20APU%20LLE%20%2B%20HLE-green.svg)](#under-the-hood-for-developers--preservationists)
 
-**Xemu Symphony** is a high-fidelity audio and performance fork of the [Xemu](https://xemu.app) Original Xbox emulator. 
+**Xemu Symphony** is a hardware-accurate audio and preservation fork of the [Xemu](https://xemu.app) Original Xbox emulator.
 
-Standard Xbox emulation has historically struggled with the console's custom NVIDIA MCPX audio chip—forcing players to choose between broken/missing surround sound, audio stutters, or complicated external workarounds. **Xemu Symphony fixes Xbox audio out of the box.**
+Standard Xbox emulation has historically struggled with the console's custom NVIDIA MCPX Audio Processing Unit (APU) and its dual Motorola DSP56362 digital signal processors—forcing players to choose between missing surround sound, loud static/tinnitus bugs in Low-Level Emulation (LLE), silent sound effects, or complicated external workarounds. **Xemu Symphony fixes Original Xbox audio out of the box.**
 
 ---
 
 ## Why Use Xemu Symphony Instead of Standard Xemu?
 
-* **True 5.1 Surround Sound Out of the Box (Zero Extra Files Needed):**
-  Standard Xemu cannot output discrete 5.1 surround sound without complex S/PDIF workarounds. Xemu Symphony includes a built-in, open-source replacement for the Xbox's internal Encode Processor (`symphony_ep_rom.h`) that taps **uncompressed, lossless 6-channel audio** directly from the console's mixer and sends it straight to your Windows/Linux audio device with zero compression loss and <5 ms latency.
+* **True 5.1 Surround Sound Out of the Box (Zero Extra ROM Files Needed):**
+  Standard Xemu cannot output discrete 5.1 surround sound. Xemu Symphony includes a built-in, clean-room open-source replacement for the Xbox's internal Encode Processor (`symphony_ep_rom.h`) and ATSC A/52 factory Y-ROM (`ep_yrom.h`) that taps **uncompressed, lossless 6-channel floating-point audio** directly from the console's mixer and sends it straight to your Windows/Linux audio device with zero compression loss and under 5 ms latency.
 
 * **Built-In 3D Surround Sound for Regular Stereo Headphones:**
-  Playing on normal stereo headphones or earbuds? You don't need a $300 sound card or complicated third-party tools (like HeSuVi, EqualizerAPO, or Virtual Audio Cable) to hear enemies behind you in *Halo 2*. Xemu Symphony features a built-in **Binaural 3D HRTF Downmixer** that converts true 6-channel Xbox surround sound into 360-degree spatial headphone audio in real time.
+  Playing on normal stereo headphones or IEMs? You don't need a dedicated sound card or third-party virtual audio cables (like HeSuVi or EqualizerAPO) to hear enemies behind you in *Halo 2*. Xemu Symphony features a built-in **5.1-to-2.0 Binaural 3D HRTF Downmixer** (`hle_binaural.h`) that converts true 6-channel Xbox surround sound into 360-degree spatial headphone audio in real time.
+
+* **Fixes Long-Standing Xbox Audio Bugs (Static, Tinnitus & Missing SFX):**
+  Resolves core Motorola DSP56362, DMA, and Voice Processor bugs that have plagued upstream Xemu for years—including rhythmic white-noise static and missing ring/environment sound effects in *WWE Raw 2* and *Whiplash*, missing commentary and arena reverb in EA SoundSys games (*Knockout Kings 2002*, *FIFA*), master-bus ducking in *Quantum Redshift*, and streaming crashes in *RPM Tuning*.
 
 * **One-Click Surround Setup (No Xbox Dashboard Required):**
-  You don't need to track down an Xbox Dashboard disc or hex-edit files just to turn on 5.1 surround sound. You can flip your virtual Xbox's system EEPROM between **Stereo (2.0)** and **Surround (5.1)** with one click right inside **Settings → Audio**.
+  You don't need to track down an Xbox Dashboard disc or hex-edit files just to turn on 5.1 surround sound. Flip your virtual Xbox's system EEPROM between **Stereo (2.0)**, **Dolby Surround (Lt/Rt)**, and **Surround (5.1)** with one click inside **Settings -> Audio**.
 
-* **Fast "HLE Reverb" Mode for Steam Deck, Handhelds & Older PCs:**
-  Emulating the Xbox's dual 100 MHz DSP audio chips at 100% hardware accuracy takes CPU power. If you're playing on a handheld or a lower-end CPU, you can flip **Hardware DSP Effects** to **OFF** to activate our fast **HLE Studio Reverb** engine—giving you full 3D positioning, 5.1 surround, and lush environmental reverb with virtually zero CPU cost.
+* **Fast "HLE Reverb + GP Heartbeat" Mode for Steam Deck, Handhelds & Older PCs:**
+  Emulating two 100 MHz Motorola DSP chips at 100% cycle accuracy takes CPU power. If you're playing on a handheld or lower-spec CPU, uncheck **Enable Real-Time DSP** to activate our **HLE Studio Reverb** engine (`hle_freeverb.h`). A built-in hybrid GP handshake and 1-in-32 subframe heartbeat keeps game audio drivers synchronized with zero freezes at ~3% of normal DSP CPU cost.
 
-* **No More Surround Audio Stutters or Cutscene Freezes:**
-  Fixes long-standing AC'97 digital audio (`SO_INDEX`) DMA bugs and DSP timing stalls that caused games to stutter, drop dialogue, or hang during cutscenes when surround sound was enabled.
+* **Curated x87 FPU & GPU Performance Fixes Included:**
+  Includes five surgical, community-vetted upstream PRs that resolve guest x87 80-bit floating-point precision loss (which previously caused missing audio in titles like *The Lord of the Rings: The Third Age*) alongside lock-free NV2A GPU fence polling and native S3TC compressed texture uploads.
 
 ---
 
 ## Quick Start: Pick Your Setup
 
-Open Xemu Symphony, go to **Settings → Audio**, and match these two dropdowns to what you're listening on:
+Open Xemu Symphony, go to **Settings -> Audio**, and match these dropdowns to what you're listening on:
 
 | What You're Using | Listening Device | Xbox System Audio Mode (EEPROM) | What You Get |
 | :--- | :--- | :--- | :--- |
@@ -40,49 +44,54 @@ Open Xemu Symphony, go to **Settings → Audio**, and match these two dropdowns 
 | **Desktop Stereo Speakers / TV Speakers** | `Speakers (Including AVR / 5.1 DAC / VSS)` | `Stereo (2.0)` | **Authentic 2001 Speaker Stereo:** Original Xbox stereo mix with Sensaura front-speaker spatial widening. |
 | **Stereo Headphones (Pure 2.0 Mode)**<br>*(For games with native headphone mixes like Doom 3)* | `Headphones (Stereo Only)` | `Stereo (2.0)` | **Pure Uncolored Stereo:** Clean 2-channel stereo with speaker cross-talk cancellation (XTC) bypassed. |
 
-> **Note:** Whenever you change **Xbox System Audio Mode (EEPROM)**, Xemu Symphony automatically updates your EEPROM file and recalculates its security checksum. Simply restart the emulator once for the new EEPROM setting to take effect. Switching between **Speakers** and **Headphones** or toggling **Hardware DSP Effects** works **live in-game** without restarting!
+> **Note:** Whenever you change **Xbox System Audio Mode (EEPROM)**, Xemu Symphony automatically updates your EEPROM file (`0x98`) and recalculates its 32-bit one's-complement checksum (`0x60`). Restart the title once for the new EEPROM setting to take effect. Switching between **Speakers** and **Headphones** or toggling **Real-Time DSP (LLE vs. HLE)** works **live in-game** without restarting!
 
-### Need More FPS on a Handheld or Older CPU?
-In **Settings → Audio**, turn **Hardware DSP Effects (High Accuracy)** **OFF**. This switches from cycle-accurate Motorola DSP emulation (LLE) to our lightweight **HLE Freeverb** engine, and unlocks sliders to customize your *Reverb Room Size*, *High-Frequency Damping*, and *Wet Level* on the fly.
+### When Should I Use LLE Mode vs. HLE Mode?
+* **LLE Mode (`Enable Real-Time DSP` ON):** Runs authentic downloadable Motorola DSP56362 Global Processor microcode. Recommended on desktop CPUs and required for games that route sound effects or custom arena acoustics exclusively through GP effect sends (*WWE Raw 2*, *Whiplash*, *Quantum Redshift*, *Knockout Kings 2002*).
+* **HLE Mode (`Enable Real-Time DSP` OFF):** Replaces heavy GP DSP execution with our lightweight C Freeverb engine (`hle_freeverb.h`) and unlocks sliders to customize *Reverb Room Size*, *High-Frequency Damping*, and *Wet Level* on the fly. Ideal for Steam Deck and handhelds.
 
 ---
 
 ## Comparison: Standard Xemu vs. Xemu Symphony
 
-| Feature | Standard Xemu | **Xemu Symphony** |
+| Feature | Standard Xemu | **Xemu Symphony (`release1`)** |
 | :--- | :--- | :--- |
 | **5.1 Surround Sound** | Not supported | **Lossless 6-Channel 32-bit Float LPCM out of the box** |
-| **External Audio Firmware (`dolby_ep.bin`)** | N/A | **Not required** (Built-in open-source `symphony_ep_rom.h`) |
-| **3D Headphone Surround** | Inaccurate HRTF stereo downmixing | **Built-in Discrete 5.1-to-2.0 Binaural HRTF Convolver** |
-| **Enabling Surround in Xbox EEPROM** | Requires booting into Xbox Dashboard | **One-click toggle inside Settings → Audio** |
-| **Low-Spec / Handheld Audio Mode** | Disabling DSP strips all game reverb | **Fast HLE Freeverb + I3DL2 Early Reflections Engine** |
-| **Output Latency** | ~30–50 ms | **< 5 ms (Real-time subframe pacing)** |
-| **DSP Engine Portability** | Rust JIT Interpreter (Stereo only) | **Optimized Pure C Interpreter (LLE + HLE, x86_64 & ARM64 ready)** |
+| **External Audio Firmware (`dolby_ep.bin`)** | N/A | **Not required** (Built-in open-source `symphony_ep_rom.h` + `ep_yrom.h`) |
+| **3D Headphone Surround** | Inaccurate stereo HRTF gating | **Unconditional 4-Corner VP 3D Submix + 5.1-to-2.0 Binaural Convolver** |
+| **LLE I3DL2 Circular DMA Delay Lines** | Byte-shears on `2 mod 4` wraps (static in *WWE Raw 2* / *Whiplash*) | **Hardware-accurate `~(item_size - 1)` word alignment (zero static)** |
+| **GP Mixbuffer (`X:$1400-$17FF`) Handling** | Scrapes GP scratch bins into surround channels | **Isolates FL/FR master returns (`b < 2`) with complementary headroom** |
+| **Enabling Surround in Xbox EEPROM** | Requires booting into Xbox Dashboard | **One-click toggle inside Settings -> Audio** |
+| **Low-Spec / Handheld Audio Mode** | Disabling DSP strips reverb or hangs games | **Fast HLE Freeverb + Hybrid GP Handshake & 1-in-32 Heartbeat** |
+| **DSP Engine Architecture** | Rust JIT / unoptimized C fallback | **Pure C11 Core with 32-Byte L1 Pre-Decoded IR Cache (`dsp_decoded_op_t`)** |
 
 ---
 
 ## Under the Hood (For Developers & Preservationists)
 
+Full technical documentation and our emulator-agnostic porting specification are available in [`docs/MCPX_SYMPHONY_ARCHITECTURE_AND_PORTING.md`](docs/MCPX_SYMPHONY_ARCHITECTURE_AND_PORTING.md).
+
 ### 1. The MCPX APU Signal Pipeline
 
-The Original Xbox's NVIDIA MCPX Southbridge Audio Processing Unit (APU) consists of three hardware stages:
-1. **Voice Processor (VP — `hw/xbox/mcpx/apu/vp/vp.c`):** Hardware synthesizer that decodes up to 256 voices (PCM / Xbox ADPCM), applies 31-tap HRIR 3D voice filtering, and accumulates audio into **32 internal Mixbins** (`mixbins[0..31]`).
-2. **Global Processor (GP — First Motorola DSP56362 Core):** Executes game-uploaded DirectSound effects microcode (I3DL2 environmental reverberation, chorus, flange, and 2D stereo submixing at `X:0x1400` / `X:0x1420`).
-3. **Encode Processor (EP — Second Motorola DSP56362 Core):** Coordinates the 6-channel surround frame clock, GP-to-EP Scratch RAM DMA rings, and output framing.
+The Original Xbox's NVIDIA MCPX Southbridge Audio Processing Unit (APU) processes 32-sample subframes at 48,000 Hz (`666.67 us` per subframe, 8 subframes / 256 samples per `5.33 ms` Encode Processor frame) across three hardware stages:
+1. **Voice Processor (VP — `hw/xbox/mcpx/apu/vp/vp.c`):** Hardware synthesizer that decodes up to 256 voices (PCM / Xbox IMA ADPCM), applies per-voice SVF filters and 31-tap HRIR 3D voice convolution (`d->vp.hrtf_submix[0..3]`), and accumulates audio into **32 internal Mixbins** (`mixbins[0..31]`).
+2. **Global Processor (GP — First Motorola DSP56362 Core):** Executes game-uploaded DirectSound effects microcode (I3DL2 environmental reverberation, chorus, flange, and 2D stereo submixing at `X:0x1400..0x143F`).
+3. **Encode Processor (EP — Second Motorola DSP56362 Core):** Coordinates the 6-channel surround frame clock, GP-to-EP Scratch RAM DMA rings, and output framing, backed by a 2,048-word factory Y-Data ROM (`Y:0x0800..0x0FFF`).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                         Xemu Symphony MCPX APU Pipeline                      │
 └───────────────────────────────────────┬──────────────────────────────────────┘
                                         │
-                  Voice Processor (VP: 256 Voices -> 32 Mixbins)
+Voice Processor (VP: 256 Voices -> 32 Mixbins) + Unconditional 4-Corner 3D HRTF Submix (0..3)
                                         │
              ┌──────────────────────────┴──────────────────────────┐
-             ▼ (DSP Effects = ON: LLE)                             ▼ (DSP Effects = OFF: HLE)
+             ▼ (Real-Time DSP = ON: LLE)                             ▼ (Real-Time DSP = OFF: HLE)
 ┌─────────────────────────────┐                       ┌─────────────────────────────┐
 │  Global Processor (GP DSP)  │                       │   HLE Studio Reverb Engine  │
 │  Motorola DSP56362 Core +   │                       │  4-Tap I3DL2 Early Refl +   │
-│  Symphony EP Micro-Kernel   │                       │  8-Comb / 4-AllPass Freeverb│
+│  Word-Aligned Circular DMA  |                       | 8-Comb / 4-AllPass Freeverb │
+|  + Front-Only Delta (b < 2) │                       │   + 1-in-32 GP Heartbeat    |
 └────────────┬────────────────┘                       └────────────┬────────────────┘
              └──────────────────────────┬──────────────────────────┘
                                         ▼
@@ -98,32 +107,25 @@ The Original Xbox's NVIDIA MCPX Southbridge Audio Processing Unit (APU) consists
 └─────────────────────┘      └─────────────────────┘      └─────────────────────┘
 ```
 
-### 2. The Open-Source `symphony_ep_rom.h` Micro-Kernel
+### 2. Key Hardware Reverse-Engineering Breakthroughs
 
-On physical 2001 Xbox hardware, the only way to transport 6 channels of audio out of the console was over a single optical S/PDIF cable (capped at 1.5 Mbps), forcing the Encode Processor (EP) to spend ~98% of its 100 MHz clock budget compressing 6-channel PCM into a lossy Dolby Digital (AC-3) bitstream.
+* **Word-Aligned Circular Scratch DMA (`dsp_dma.c`):** DirectSound I3DL2 reverb microcode configures 8 parallel 32-bit (`format = 2`, `item_size = 4` bytes) circular delay lines (`buf_id = 0xE`) in system RAM with `2 mod 4` byte lengths (e.g., `0x31AC2`, `0x3220A`, `0x3104E`, `0x12FD6`, `0x118D6`) and unaligned base addresses. Unmasked byte wrapping split 4-byte samples (`2 bytes + 2 bytes`) across wrap boundaries every ~1.06 seconds, shifting the writeback pointer by 16 bits and reading adjacent sample LSBs into the 24-bit DSP sign byte. Enforcing hardware `~(item_size - 1)` alignment eliminates LLE static completely.
+* **GP Mixbuffer Scratch Isolation (`gp_ep.c`):** `X:0x1400..0x17FF` is the VP-to-GP input mixbuffer. During execution, DirectSound GP microcode writes wet stereo returns into `X:0x1400..0x143F` (`b = 0..1`, `FL/FR`) and reuses `X:0x1440..0x14BF` (`b = 2..5`, `FC, LFE, RL, RR`) as temporary IIR filter scratch RAM. Isolating LLE GP delta extraction (`gp_fx = gp_ch - mixbins`) to `b < 2` with complementary headroom scaling (`0.35f` wet / `0.65f` 3D submix) prevents scratch data from corrupting LFE and surround channels.
+* **Unconditional VP 3D HRTF Submix Routing (`vp.c`):** On Xbox silicon, the Voice Processor's 3D HRTF unit (`v < 64 && !stereo && hrtf_handle != 0xFFFF`) is an internal 4-quadrant hardware spatializer (`d->vp.hrtf_submix[0..3]`) that is always active regardless of whether the host output is headphones or 5.1 speakers. Decoupling `use_hrtf` in `vp.c` from the host headphone toggle restores rear-channel 3D voices and prevents dry 3D voice overdrive in 6-channel discrete mode.
+* **The Open-Source `symphony_ep_rom.h` Micro-Kernel & `ep_yrom.h`:** Implements a clean-room 584-word resident EP executive (`P:0x0000` and `P:0x0180`) that maintains 100% hardware register, mailbox, and DMA compatibility (including the Bit-14 `0x4000` DMA zero-generator hole) while yielding via `WAIT` (`0x000086`) so 6-channel float PCM can be tapped losslessly. For preservationists running an external 7,264-word retail `dolby_ep.bin`, `ep_yrom.h` provides the complete 2,048-word ATSC A/52A factory Y-Data ROM (`Y:0x0800..0x0FFF`).
 
-Through deterministic disassembly and execution tracing of the 7,264-word factory EP ROM, we isolated the two resident executive segments (`Segment 1` at `P:0x0000..0x00C7` and `Segment 2` at `P:0x0180..0x02FF`) from the six relocatable ATSC A/52 compression overlays (`Overlays #1..#6` dynamically DMA-loaded at `P:0x0300`). 
+---
 
-Because Xemu Symphony taps the 6 discrete channels losslessly in 32-bit floating-point PCM, **`symphony_ep_rom.h`** implements a clean-room 584-word resident micro-kernel that maintains 100% hardware register, status mailbox (`P:0x0001..0x0007`), and DMA syscall (`P:0x0180`) compatibility while short-circuiting the AC-3 compression overlays and yielding via opcode `WAIT` (`0x000086`) in ~20 cycles per subframe.
+## Curated Non-Audio Fixes Included in Mainline (`release1`)
 
-### 3. Advanced Historical Preservation Modes (Pro Logic Lt/Rt & AC-3 BYOL)
+While Xemu Symphony's development is strictly dedicated to the MCPX APU and Motorola DSP56362 audio subsystem, certain upstream Xbox emulation bugs outside the APU directly manifest as "broken audio" (when corrupted x87 FPU math zeroes out 3D voice distance/attenuation in guest `dsound` drivers) or cause severe frame-time stalls.
 
-For hardware purists and preservationists, **Settings → Audio → Advanced Settings** provides two legacy 2001 hardware modes:
-* **Dolby Surround (Pro Logic Lt/Rt Matrix):** Downmixes the 6 discrete surround channels into a 2-channel matrix-encoded stereo stream ($L_t / R_t$) using $90^\circ$ all-pass phase shifting (`hle_prologic_ltrt_downmix_subframe`) for decoding on vintage analog Dolby Pro Logic receivers.
-* **Dolby Digital 5.1 (Bring Your Own License — `dolby_ep.bin`):** Users who wish to run the original 7,264-word Motorola AC-3 encoding microcode for hardware preservation can enable this toggle and select their own `dolby_ep.bin` dump (available for archival research on the [Internet Archive](https://archive.org/details/dolby_ep)).
-
-### 4. Discrete 5.1 Channel Ordering
-
-When **Listening Device** is set to **Speakers** with a **Surround (5.1)** EEPROM, SDL3 outputs standard 6-channel uncompressed LPCM:
-
-| Channel Index | Identifier | Speaker Destination |
-| :---: | :--- | :--- |
-| **0** | Front Left (`FL`) | Left Front Satellite (3D + 2D Stereo Bus) |
-| **1** | Front Right (`FR`) | Right Front Satellite (3D + 2D Stereo Bus) |
-| **2** | Front Center (`FC`) | Center Dialogue Channel |
-| **3** | Low-Frequency Effects (`LFE`) | Subwoofer (< 120 Hz) |
-| **4** | Surround Left (`SL`) | Left Rear Surround |
-| **5** | Surround Right (`SR`) | Right Rear Surround |
+Mainline `release1` integrates **only** the following five vetted community commits outside the audio stack:
+1. `target/i386: Preserve x87 load precision` (*Korze Warrior*) — Fixes 80-bit x87 load precision loss that caused missing audio streams in titles like *The Lord of the Rings: The Third Age*.
+2. `Translator: end the block after fldcw only when the precision bit changes; stop using pc-relative blocks` (*Community PR*) — Eliminates translation block thrashing on guest FPU control-word toggles.
+3. `i386/tcg: stub rdpmc to return 0 instead of raising #UD` (*EqUiNoX*) — Prevents guest crashes on performance-counter reads.
+4. `nv2a: Add lock-free fast path for fence polling reads` (*Nick Spargo / Tovarichtch*) — Eliminates Big QEMU Lock (BQL) contention during GPU fence polling.
+5. `nv2a/gl: upload S3TC textures without decompressing them` (*Nick Spargo / Tovarichtch*) — Avoids CPU-side S3TC texture decompression stalls.
 
 ---
 
@@ -135,25 +137,25 @@ When **Listening Device** is set to **Speakers** with a **Surround (5.1)** EEPRO
 * **Build Environment (Windows):** MSYS2 MinGW-w64 (`MINGW64` shell)
 
 ### Compile & Package
-```bash
-cd /[drive letter]/xemu
-./build.sh
-```
-The compiled executable and required runtime DLLs will be packaged in `./dist/xemu.exe`.
+    cd /z/xemu
+    ./build.sh
+
+The compiled executable will be generated at `./build/qemu-system-i386w.exe` (and packaged in `./dist/xemu.exe`).
 
 ---
 
-## Roadmap
+## Roadmap & Release History
 
-* [x] **Beta 5:** Clean-room open-source `symphony_ep_rom.h` micro-kernel (zero external ROM dependencies) & DSP56362 C interpreter accuracy fixes.
-* [x] **Beta 6 (Current Release Candidate):** Built-in 5.1-to-2.0 Binaural HRTF headphone downmixer, HLE Freeverb studio reverb engine, one-click EEPROM audio switcher, and redesigned Audio UI.
-* [ ] **macOS Universal Binaries:** Automated Apple Silicon / Intel macOS release packaging.
+* [x] **Alpha 1 – Alpha 4:** Initial 6-channel surround tap, EEPROM audio parser, and Motorola DSP56362 24-bit AGU / stack / loop accuracy fixes.
+* [x] **Beta 1 – Beta 5:** Clean-room ATSC A/52 `ep_yrom.h` generator, open-source `symphony_ep_rom.h` micro-kernel (zero external ROM dependencies), and 32-byte pre-decoded DSP IR cache.
+* [x] **Beta 6 – Beta 8:** 2:2:2 Audio Matrix, 5.1-to-2.0 Binaural HRTF headphone downmixer, HLE Freeverb studio reverb engine, hybrid GP heartbeat, and VP LUT/SGE/ADPCM caching.
+* [x] **Beta 9 & General Release 1 (`release1` — Current):** Word-aligned circular scratch DMA (`dsp_dma.c`), GP mixbuffer scratch isolation (`b < 2`), unconditional VP 3D HRTF submix routing, curated x87/NV2A fixes, and portable developer documentation.
 
 ---
 
 ## AI Disclosure
 
-This project utilizes iterative AI-assisted engineering for forensic disassembly analysis, hardware trace verification, and cross-platform C/C++ implementation. Every architectural change is deterministically verified against Motorola DSP56300/DSP56362 silicon documentation and live retail Xbox game testing.
+This project utilizes iterative AI-assisted engineering for forensic disassembly analysis, live hardware telemetry verification, and cross-platform C/C++ implementation. Every architectural change is deterministically verified against Motorola DSP56300/DSP56362 silicon documentation and retail Xbox hardware behavior.
 
 ---
 
