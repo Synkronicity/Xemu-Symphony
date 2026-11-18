@@ -65,7 +65,7 @@ static const uint32_t symphony_ep_rom[SYMPHONY_EP_ROM_WORDS] = {
     0x07F431, 0x000001, /* P:0x0011: movep #$000001,x:$ffffb1 */
     0x0500BB,           /* P:0x0013: movec #$00,sp (Reset stack pointer) */
     0x05F42A, 0x000BE0, /* P:0x0014: movec #$000be0,ep (Set Extension Pointer) */
-    0x0520B8,           /* P:0x0016: movec #$20,mr (Set Mode Register) */
+    0x0020F8,           /* P:0x0016: ori #$20,mr (Set Mode Register) */
     0x0AFA74,           /* P:0x0017: bset #20,omr (Set OMR bit 20) */
     0x200013,           /* P:0x0018: clr a */
     0x077088, 0x000001, /* P:0x0019: movem a0,p:$0001 (Clear block counter) */
@@ -75,7 +75,7 @@ static const uint32_t symphony_ep_rom[SYMPHONY_EP_ROM_WORDS] = {
     0x56F400, 0x000000, /* P:0x0020: move #$000000,a (Cmd 0x00) */
     0x0BF080, 0x000180, /* P:0x0022: jsr p:$0180 (Call Service Kernel Cmd 0x00) */
     0x200003,           /* P:0x0024: tst a */
-    0x0D1042, 0x000029, /* P:0x0025: bne p:$0029 (Branch to loop on error) */
+    0x0D1042, 0x000004, /* P:0x0025: bne p:$0029 (Branch to loop on error) */
     0x08F485, 0x000002, /* P:0x0027: movep #$000002,x:$ffffc5 (Clear START_FRAME) */
 
     /* Words 41..47 (P:0x0029..0x002F): Subframe Supervisor Loop Entry */
@@ -98,7 +98,7 @@ static const uint32_t symphony_ep_rom[SYMPHONY_EP_ROM_WORDS] = {
     0x382000,           /* P:0x003E: move #$20,n0 (Max count = 0x20) */
     0x0BF080, 0x000180, /* P:0x003F: jsr p:$0180 (Call Service Kernel Cmd 0x0A) */
     0x200003,           /* P:0x0041: tst a */
-    0x0D1042, 0x000029, /* P:0x0042: bne p:$0029 */
+    0x0D1042, 0xFFFFE7, /* P:0x0042: bne p:$0029 */
 
     /* Words 68..72 (P:0x0044..0x0048): Clear Cold-Start Initialization Flags */
     0x240000,           /* P:0x0044: move #$00,x0 */
