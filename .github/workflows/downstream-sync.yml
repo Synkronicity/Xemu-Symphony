@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Downstream Branch
         uses: actions/checkout@v4
         with:
-          ref: feature/xemu-dsp56362
+          ref: master
           fetch-depth: 0
           submodules: recursive
 
