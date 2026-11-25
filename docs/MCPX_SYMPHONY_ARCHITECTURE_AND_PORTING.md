@@ -163,7 +163,7 @@ Symphony organizes audio rendering around three independent 2-state switches - t
             
         *   **LFE Conditioning:** 120 Hz single-pole LPF (α=0.0155, gain `0.45`) summed in-phase into both ears.
 
-    *   **Stereo:** Outputs either clean, unprocessed 2.0 stereo (`L = FL + 0.7071*FC + 0.7071*RL`, `R = FR + 0.7071*FC + 0.7071*RR`) or the original front-facing stereo (`frame_buf[256][2]`) which was configured to use Sensaura's Transaural Crosstalk Cancellation (XTC) algorithm which injects anti-phase signals that cancel properly in open air between speakers, but cause harsh 500 Hz–4 kHz comb filtering and hollowed-out center dialogue on headphones.
+    *   **Stereo:** Outputs either clean, unprocessed 2.0 stereo or the original front-facing stereo (`frame_buf[256][2]`) which was configured to use Sensaura's Transaural Crosstalk Cancellation (XTC) algorithm which injects anti-phase signals that cancel properly in open air between speakers, but cause harsh 500 Hz–4 kHz comb filtering and hollowed-out center dialogue on headphones.
             
 3.  **Historical Preservation: Optional Dolby Digital (AC-3) Encoding and Dolby Pro Logic II Matrixed Stereo**
     
