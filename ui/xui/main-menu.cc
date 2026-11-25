@@ -854,10 +854,10 @@ void MainMenuAudioView::Draw()
     Slider("Output volume limit", &g_config.audio.volume_limit, vol_buf);
     ImGui::PopID();
 
-    // 2. Audio Processing Engine
-    SectionTitle("Audio Processing Engine");
-    Toggle("Hardware DSP Effects (High Accuracy)", &g_config.audio.use_dsp,
-           "ON: Authentic Xbox DSP. OFF: Fast HLE reverb.");
+    // 2. Audio Processing Unit
+    SectionTitle("Audio Processing Unit");
+    Toggle("Hardware DSP Effects", &g_config.audio.use_dsp,
+           "ON: LLE Global Processor (GP). OFF: Fast HLE reverb.");
 
     if (!g_config.audio.use_dsp) {
         char room_buf[64];
@@ -902,14 +902,14 @@ void MainMenuAudioView::Draw()
 
     int endpoint = g_config.audio.endpoint_mode;
     if (ChevronCombo("Listening Device", &endpoint,
-                     "Speakers (Including AVR / 5.1 DAC / VSS)\0"
+                     "Speakers (AVR / 5.1 DAC / VSS)\0"
                      "Headphones (Stereo Only)\0",
-                     "Select your physical audio listening environment")) {
+                     "Select your audio endpoint")) {
         g_config.audio.endpoint_mode = endpoint;
     }
 
     int eeprom_ui_sel = (s_eeprom_mode == XEMU_EEPROM_AUDIO_STEREO) ? 0 : 1;
-    if (ChevronCombo("Xbox System Audio Mode (EEPROM)", &eeprom_ui_sel,
+    if (ChevronCombo("Xbox Audio Mode (EEPROM)", &eeprom_ui_sel,
                      "Stereo (2.0)\0"
                      "Surround (5.1)\0",
                      "Non-volatile sound setting stored inside your Xbox EEPROM image")) {
@@ -926,22 +926,22 @@ void MainMenuAudioView::Draw()
     }
 
     if (ImGui::CollapsingHeader("Advanced Settings")) {
-        if (Toggle("Dolby Surround (Pro Logic Lt/Rt)", &g_config.audio.dolby_surround_ltrt,
-                   "2-channel matrix surround for Pro Logic receivers")) {
+        if (Toggle("Dolby Pro Logic II (Lt/Rt)", &g_config.audio.dolby_surround_ltrt,
+                   "2-channel analog matrix surround for Pro Logic II receivers")) {
             if (g_config.audio.dolby_surround_ltrt) {
                 g_config.audio.dolby_digital_ac3 = false;
                 xemu_eeprom_set_audio_mode(XEMU_EEPROM_AUDIO_DOLBY_DIGITAL_51);
                 s_eeprom_mode = XEMU_EEPROM_AUDIO_DOLBY_DIGITAL_51;
                 s_eeprom_popup_msg =
-                    "Dolby Surround (Lt/Rt Matrix) mode enabled. Your EEPROM has been configured for "
-                    "Dolby Digital 5.1 with a verified checksum to ensure games output all 6 discrete surround channels. "
-                    "Please restart Xemu Symphony for the matrix downmix to take effect.";
+                    "Dolby Pro Logic II (Lt/Rt Matrix) mode enabled. Your EEPROM has been configured for "
+                    "analog surround sound with a verified checksum to ensure games output all 6 discrete surround channels. "
+                    "Please restart Xemu Symphony for the matrix encoding to take effect.";
                 s_show_eeprom_restart_popup = true;
             } else {
                 xemu_eeprom_set_audio_mode(XEMU_EEPROM_AUDIO_STEREO);
                 s_eeprom_mode = XEMU_EEPROM_AUDIO_STEREO;
                 s_eeprom_popup_msg =
-                    "Dolby Surround (Lt/Rt Matrix) mode disabled. Symphony EP micro-kernel re-enabled "
+                    "Dolby Pro Logic II (Lt/Rt Matrix) mode disabled. Symphony EP micro-kernel re-enabled "
                     "and EEPROM restored to Stereo. Please restart Xemu Symphony.";
                 s_show_eeprom_restart_popup = true;
             }
@@ -955,7 +955,7 @@ void MainMenuAudioView::Draw()
                 s_eeprom_mode = XEMU_EEPROM_AUDIO_DOLBY_DIGITAL_51;
                 s_eeprom_popup_msg =
                     "Dolby Digital 5.1 (AC-3 BYOL) enabled. Your EEPROM has been configured for Dolby Digital 5.1. "
-                    "Please supply a valid 7,264-word dolby_ep.bin and restart Xemu Symphony.";
+                    "Please supply a valid   7,264-word dolby_ep.bin and restart Xemu Symphony.";
                 s_show_eeprom_restart_popup = true;
             }
             g_main_menu.UpdateAboutViewConfigInfo();
@@ -986,70 +986,70 @@ void MainMenuAudioView::Draw()
 
         if (is_surround && is_headphones) {
             // Profile: Surround + Headphones -> Binaural HRTF
-            ImGui::TextColored(ImVec4(0.9f, 0.4f, 1.0f, 1.0f), "BINAURAL HRTF VIRTUAL SURROUND (5.1 -> 2.0 HEADPHONES)");
+            ImGui::TextColored(ImVec4(0.9f, 0.4f, 1.0f, 1.0f), " BINAURAL HRTF VIRTUAL SURROUND (5.1 -> 2.0 HEADPHONES)");
             ImGui::Separator();
             ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
                 "  Virtual 5.1 Array: [FL -30°] [FC 0°] [FR +30°] + [RL -110°] [RR +110°] + [LFE]");
             ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f),
-                "      ===> [Woodworth ITD + 6.5 kHz Pinna Convolver] ===> [2.0 Headphones]");
+                "  ===> [Woodworth ITD + 6.5 kHz Pinna Convolver] ===> [2.0 Headphones]");
             ImGui::Dummy(ImVec2(0, 4));
-            ImGui::TextWrapped("Spatializes all 6 discrete Xbox surround channels into a 3D binaural headphone mix in real time. No external HeSuVi, EqualizerAPO, or Virtual Audio Cable required.");
+            ImGui::TextWrapped("Spatializes all 6 discrete Xbox surround channels into a 3D binaural headphone mix in real time. No 5.1 endpoint required.");
 
         } else if (is_surround && !is_headphones && g_config.audio.dolby_surround_ltrt) {
             // Profile: Surround + Speakers + Dolby Surround Lt/Rt
-            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "DOLBY SURROUND PRO LOGIC Lt/Rt MATRIX (2.0 STEREO)");
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), " DOLBY PRO LOGIC II Lt/Rt MATRIXED STEREO");
             ImGui::Separator();
             ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
-                "  [5.1 Surround Channels]  --->  [Lt/Rt Matrix + 90° Phase Biquads]  --->  [2.0 Stereo AVR / TV]");
+                " 5.1 Surround Channels -> Lt/Rt Matrix + 90° Phase Biquads -> 2.0 Stereo -> AVR");
             ImGui::TextColored(ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
-                "  Signal Path: Lt = FL + 0.707*FC - 0.707*j*(RL+RR) | Rt = FR + 0.707*FC + 0.707*j*(RL+RR)");
+                " Lt = FL+0.707*FC-0.707*j*(RL+RR)  |  Rt = FR+0.707*FC+0.707*j*(RL+RR)");
             ImGui::Dummy(ImVec2(0, 4));
-            ImGui::TextWrapped("Matrix-encodes discrete 5.1 surround into an authentic 2-channel analog Lt/Rt stereo stream decodable by vintage Dolby Pro Logic AVR receivers. Not recommended; only for historical preservation.");
+            ImGui::TextWrapped("Not recommended; only for historical preservation. Matrix-encodes discrete 5.1 channels through the use of phase shifting and filtering to compress surround information into a standard 2-channel analog Lt/Rt stereo stream decodable by vintage Dolby Pro Logic II receivers back into a simulated 5.1 channel layout. While it does successfully upmix stereo signals into five full-frequency channels it cannot achieve the true channel separation of a discrete digital stream, making it difficult to isolate sound from the rear speakers. On the Xbox this was the mode games would fallback to if they couldn't play a digital stream with surround sound enabled in the EEPROM.");
 
         } else if (is_surround && !is_headphones && !g_config.audio.dolby_surround_ltrt) {
             // Profile: Surround + Speakers + Discrete 5.1
             if (g_config.audio.dolby_digital_ac3) {
-                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "AUTHENTIC DOLBY DIGITAL 5.1 AC-3 (firmware required)");
+                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), " AUTHENTIC DOLBY DIGITAL 5.1 AC-3 Encoding (firmware required)");
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
-                    "  [FL] [FC] [FR] + [Subwoofer LFE] + [RL] [RR]  --->  [Motorola EP DSP (dolby_ep.bin)]  --->  [S/PDIF]");
+                    " [FL][FC][FR]+[Subwoofer LFE]+[RL][RR] -> [Encode Processor (EP)] -> [S/PDIF Out]");
                 ImGui::TextColored(ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
-                    "  Hardware Dolby Digital AC-3 Compression Engine");
+                    " LLE Hardware Dolby Digital AC-3 Compression Engine");
                 ImGui::Dummy(ImVec2(0, 4));
-                ImGui::TextWrapped("Runs authentic Motorola DSP56362 Dolby Digital AC-3 bitstream compression using your supplied dolby_ep.bin firmware. Not recommended; only for historical preservation. For licensing reasons you must supply your own firmware.");
+                ImGui::TextWrapped("Not recommended; only for historical preservation. Runs the authentic Motorola DSP56362 Encode Processor (EP) microcode using your supplied dolby_ep.bin firmware for Dolby Digital AC-3 bitstream compression. For licensing reasons you must supply your own firmware. Will negatively impact performance for lower-end CPUs.");
             } else {
-                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.9f, 1.0f), "DISCRETE 5.1 MULTICHANNEL LPCM (6-CHANNEL LOSSLESS)");
+                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.9f, 1.0f), " DISCRETE 5.1 MULTICHANNEL LPCM (6-CHANNEL LOSSLESS)");
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
-                    "  [FL]   [FC]   [FR]  +  [Subwoofer LFE]  +  [RL]       [RR]  ---> 6-Channel Discrete LPCM via SDL3");
+                    " [FL] [FC] [FR]+[Subwoofer LFE]+[RL] [RR] -> 6-Channel Discrete LPCM via SDL3");
                 ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f),
-                    "  Symphony EP Micro-Kernel ---> 6-Channel 32-bit Float LPCM via SDL3");
+                    " Governed by the Open Source Symphony Encode Processor (EP) Micro-Kernel");
                 ImGui::Dummy(ImVec2(0, 4));
-                ImGui::TextWrapped("Outputs 6 discrete uncompressed LPCM channels directly to your 5.1 AVR (via HDMI) or multi-channel sound card using the built-in open-source Symphony EP micro-kernel. This is the highest fidelity audio setting. Must have a 5.1 endpoint.");
+                ImGui::TextWrapped("This is the highest fidelity setting. Must have a 5.1 endpoint. Outputs 6 discrete uncompressed LPCM channels directly to your 5.1 AVR (via HDMI) or multi-channel sound card/virtual surround sound software using the built-in open-source Symphony EP micro-kernel. The original Xbox makes use of Sensaura's MultiDrive 5.1 technology to render 3D positional audio by integrating a front and rear hemisphere via multi-speaker arrays to convey an enhanced HRTF effect compared to traditional 2-channel HRTF.");
             }
 
         } else if (!is_surround && is_headphones) {
             // Profile: Stereo + Headphones
-            ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), "PURE STEREO HEADPHONES (2.0 UNCOLORED)");
+            ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), " PURE STEREO HEADPHONES (NO ADDITIONAL PROCESSING)");
             ImGui::Separator();
             ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
-                "  [VP 256 Voices]  --->  [%s]  --->  [Left Ear (0°)]  ( Listener )  [Right Ear (0°)]",
-                g_config.audio.use_dsp ? "LLE GP DSP" : "HLE Freeverb");
+                " [Voice Processor (VP)] -> [%s] -> [Left Ear(0°)] (Listener) [Right Ear(0°)]",
+                g_config.audio.use_dsp ? "LLE DSP" : "HLE Freeverb");
             ImGui::TextColored(ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
-                "  Sensaura XTC Bypassed | Zero Crosstalk Cancellation");
+                " Sensaura XTC Bypassed for Zero Front-Speaker Crosstalk Cancellation");
             ImGui::Dummy(ImVec2(0, 4));
-            ImGui::TextWrapped("Delivers a stereo mix without speaker Cross-Talk Cancellation (XTC). Ideal for games with dedicated headphone mixes (e.g. Doom 3). Otherwise not recommended for the majority of titles.");
+            ImGui::TextWrapped("Delivers a stereo mix without front-speaker crosstalk cancellation (XTC). Ideal for games with dedicated headphone mixes (e.g. Doom 3). Otherwise not recommended for the majority of titles as the original Xbox never natively supported headphones without routing audio through another endpoint, such as a TV's audio output jack or by using RCA adapters.");
 
         } else {
             // Profile: Stereo + Speakers
-            ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.5f, 1.0f), "AUTHENTIC 2001 FRONT-SPEAKER STEREO");
+            ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.5f, 1.0f), " AUTHENTIC XBOX FRONT-SPEAKER STEREO");
             ImGui::Separator();
             ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f),
-                "  [FL Speaker]                ( Listener )                [FR Speaker]");
+                " [FL Speaker]                                                     [FR Speaker]");
             ImGui::TextColored(ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
-                "  Sensaura XTC Front-Speaker Cross-Cancellation Active");
+                " Sensaura XTC Transaural Acoustic Crosstalk Cancellation");
             ImGui::Dummy(ImVec2(0, 4));
-            ImGui::TextWrapped("Applies the original Xbox Sensaura XTC front-speaker mix. Do not use with headphones.");
+            ImGui::TextWrapped("Do not use with headphones. Applies the original Xbox Sensaura XTC algorithm to deliver an externalized 3D sound field, simulating HRTF with front-facing speakers by introducing an inverse filter or an out-of-phase signal to cancel out the left and right speakers acoustically bleeding into each other. Requires you to be sitting at a certain distance away from the speakers for it to work as designed.");
         }
 
         ImGui::Dummy(ImVec2(0, 4));
