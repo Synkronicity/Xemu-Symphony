@@ -21,6 +21,7 @@
  */
 
 #include "hw/xbox/mcpx/apu/apu_int.h"
+#include "ep_yrom.h"
 #include "hle_freeverb.h"
 #include "hle_binaural.h"
 
@@ -28,11 +29,18 @@
 #define GP_MAX_SUBFRAME_CYCLES 100000
 #define GP_LLE_FX_GAIN 0.35f
 
+typedef struct {
+    double x1, x2, y1, y2;
+} EpLfeBiquadState;
+
 static const int16_t ep_silence[256][2] = { 0 };
 
 static HleFreeverbState s_freeverb;
 static HleBinauralState s_binaural;
 static int s_gp_handshake_subframes = 64;
+static EpLfeBiquadState s_lfe_biquads[4];
+static bool s_prev_5_1_active;
+static bool s_prev_lfe_lpf_enabled;
 
 static inline float clampf(float v, float min_val, float max_val)
 {
@@ -43,6 +51,51 @@ static inline float clampf(float v, float min_val, float max_val)
         return max_val;
     }
     return v;
+}
+
+static inline double q23_to_double(uint32_t w)
+{
+    int32_t s = (int32_t)(w << 8) >> 8;
+    return (double)s * (1.0 / 8388608.0);
+}
+
+static void ep_lfe_filter_reset(void)
+{
+    memset(s_lfe_biquads, 0, sizeof(s_lfe_biquads));
+    s_prev_5_1_active = false;
+    s_prev_lfe_lpf_enabled = false;
+}
+
+static void ep_lfe_filter_subframe(float ch6[NUM_SAMPLES_PER_FRAME][6])
+{
+    double a1[4], a2[4], b0[4], b1[4], b2[4];
+    for (int s = 0; s < 4; s++) {
+        a1[s] = 2.0 * q23_to_double(ep_yrom[s * 5 + 0]);
+        a2[s] =       q23_to_double(ep_yrom[s * 5 + 1]);
+        b0[s] =       q23_to_double(ep_yrom[s * 5 + 2]);
+        b1[s] = 2.0 * q23_to_double(ep_yrom[s * 5 + 3]);
+        b2[s] =       q23_to_double(ep_yrom[s * 5 + 4]);
+    }
+
+    for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+        double x = isfinite(ch6[i][3]) ? (double)ch6[i][3] : 0.0;
+        for (int s = 0; s < 4; s++) {
+            EpLfeBiquadState *st = &s_lfe_biquads[s];
+            double y = b0[s] * x + b1[s] * st->x1 + b2[s] * st->x2
+                       - a1[s] * st->y1 - a2[s] * st->y2;
+            if (!isfinite(y)) {
+                y = 0.0;
+            } else if (fabs(y) < 1.0e-20) {
+                y = 0.0;
+            }
+            st->x2 = st->x1;
+            st->x1 = x;
+            st->y2 = st->y1;
+            st->y1 = y;
+            x = y;
+        }
+        ch6[i][3] = clampf((float)x, -1.0f, 1.0f);
+    }
 }
 
 static inline int16_t float_to_s16(float v)
@@ -538,6 +591,9 @@ static void ep_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     case NV_PAPU_EPRST:
         proc_rst_write(d->ep.dsp, d->ep.regs[NV_PAPU_EPRST], val);
         d->ep.regs[NV_PAPU_EPRST] = val;
+        if (!(val & NV_PAPU_GPRST_GPRST) || !(val & NV_PAPU_GPRST_GPDSPRST)) {
+            ep_lfe_filter_reset();
+        }
         d->ep_frame_div = 0; /* FIXME: Still unsure about frame sync */
         break;
     default:
@@ -695,6 +751,27 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
         }
     }
 
+    bool lfe_lpf_enabled = false;
+    if (d->is_5_1_active) {
+        if (d->ep.dsp && ep_enabled &&
+            dsp_read_memory(d->ep.dsp, 'X', 0x0BC0) == 0x18) {
+            lfe_lpf_enabled = (dsp_read_memory(d->ep.dsp, 'X', 0x0BCA) & 1) != 0;
+        } else {
+            lfe_lpf_enabled = true;
+        }
+    }
+
+    if ((d->is_5_1_active && !s_prev_5_1_active) ||
+        (lfe_lpf_enabled && !s_prev_lfe_lpf_enabled)) {
+        memset(s_lfe_biquads, 0, sizeof(s_lfe_biquads));
+    }
+    s_prev_5_1_active = d->is_5_1_active;
+    s_prev_lfe_lpf_enabled = lfe_lpf_enabled;
+
+    if (lfe_lpf_enabled) {
+        ep_lfe_filter_subframe(ch6);
+    }
+
     int off = (d->ep_frame_div % 8) * NUM_SAMPLES_PER_FRAME;
 
     /* Step C — Route to Output Buffer (surround_buf vs. frame_buf) Based on (d->is_5_1_active, is_headphones) */
@@ -778,8 +855,15 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
     }
 }
 
+void mcpx_apu_dsp_reset(MCPXAPUState *d)
+{
+    (void)d;
+    ep_lfe_filter_reset();
+}
+
 void mcpx_apu_dsp_init(MCPXAPUState *d)
 {
+    mcpx_apu_dsp_reset(d);
     d->gp.dsp = dsp_init(d, gp_scratch_rw, gp_fifo_rw, true);
     dsp_set_halt_requested(d->gp.dsp, false);
     dsp_set_cycle_count(d->gp.dsp, 0);

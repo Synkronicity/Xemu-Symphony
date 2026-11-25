@@ -1,7 +1,7 @@
 # Xemu Symphony
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](#license--attribution)
-[![Release: General Release 2](https://img.shields.io/badge/Release-release2-brightgreen.svg)](#roadmap--release-history)
+[![Release: General Release 2](https://img.shields.io/badge/Release-release3-brightgreen.svg)](#roadmap--release-history)
 [![Audio: True 5.1 Surround & 3D Headphones](https://img.shields.io/badge/Audio-5.1%20LPCM%20%7C%203D%20Binaural%20HRTF-orange.svg)](#quick-start-pick-your-setup)
 [![Architecture: MCPX APU DSP56362](https://img.shields.io/badge/Hardware-MCPX%20APU%20LLE%20%2B%20HLE-green.svg)](#under-the-hood-for-developers--preservationists)
 
@@ -58,7 +58,7 @@ Open Xemu Symphony, go to **Settings -> Audio**, and match these dropdowns to wh
 
 ## Comparison: Standard Xemu vs. Xemu Symphony
 
-| Feature | Standard Xemu | **Xemu Symphony (`release2`)** |
+| Feature | Standard Xemu | **Xemu Symphony (`release3`)** |
 | :--- | :--- | :--- |
 | **5.1 Surround Sound** | Not supported | **Lossless 6-Channel LPCM out of the box** |
 | **External Audio Firmware (`dolby_ep.bin`)** | N/A | **Not required** (Built-in open-source `symphony_ep_rom.h`) |
@@ -122,11 +122,11 @@ Voice Processor (VP: 256 Voices -> 32 Mixbins) + Unconditional 4-Corner 3D HRTF 
 
 ---
 
-## Curated Non-Audio Fixes Included in Mainline (`release2`)
+## Curated Non-Audio Fixes Included in Mainline (`release3`)
 
 While Xemu Symphony's development is strictly dedicated to the MCPX APU and Motorola DSP56362 audio subsystem, certain upstream Xbox emulation bugs outside the APU directly manifest as "broken audio" (when corrupted x87 FPU math zeroes out 3D voice distance/attenuation in guest `dsound` drivers) or cause severe frame-time stalls.
 
-Mainline `release2` integrates **only** the following five vetted community commits outside the audio stack:
+Mainline `release3` integrates **only** the following five vetted community commits outside the audio stack:
 1. `target/i386: Preserve x87 load precision` (*Korze Warrior*) — Fixes 80-bit x87 load precision loss that caused missing audio streams in titles like *The Lord of the Rings: The Third Age*.
 2. `Translator: end the block after fldcw only when the precision bit changes; stop using pc-relative blocks` (*Community PR*) — Eliminates translation block thrashing on guest FPU control-word toggles.
 3. `i386/tcg: stub rdpmc to return 0 instead of raising #UD` (*EqUiNoX*) — Prevents guest crashes on performance-counter reads.
@@ -155,7 +155,7 @@ The compiled executable will be generated at `./build/qemu-system-i386w.exe` (an
 * [x] **Alpha 1 – Alpha 4:** Initial 6-channel surround tap, EEPROM audio parser, and Motorola DSP56362 24-bit AGU / stack / loop accuracy fixes.
 * [x] **Beta 1 – Beta 5:** Clean-room ATSC A/52 `ep_yrom.h` generation, open-source `symphony_ep_rom.h` micro-kernel (zero external ROM dependencies), and 32-byte pre-decoded DSP IR cache.
 * [x] **Beta 6 – Beta 8:** 2:2:2 Audio Matrix, 5.1-to-2.0 Binaural HRTF headphone downmixer, HLE Freeverb studio reverb engine, hybrid GP heartbeat, and VP LUT/SGE/ADPCM caching.
-* [x] **Beta 9 & General Release 1 (`release2` = Current):** Word-aligned circular scratch DMA (`dsp_dma.c`), GP mixbuffer scratch isolation (`b < 2`), unconditional VP 3D HRTF submix routing, curated x87/NV2A fixes, and portable developer documentation.
+* [x] **Beta 9 & General Release 1 (`release3` = Current):** Word-aligned circular scratch DMA (`dsp_dma.c`), GP mixbuffer scratch isolation (`b < 2`), unconditional VP 3D HRTF submix routing, curated x87/NV2A fixes, and portable developer documentation.
 * [ ] **To Do:** 1. Build and continuously integrate macOS releases. 2. Finish documentation. 3. Improve the Audio Settings menu by replacing the text description box at the bottom with vector graphics depicting the various options and endpoints. 4. Figure out how to seamlessly translate said menu for non-English speakers.
 
 
@@ -194,6 +194,8 @@ This project is licensed under the **GNU General Public License v2.0 (GPLv2)**.
 
 > 1) mcpx-apu: Don't abort on out-of-range GP/EP scatter-gather access
 > 2) apu/vp: Run voices in order when multipass departs from DirectSound
+
+Also for Emusyne's excellent, silicon-accurate APU implementation where I lifted, for `release3`, inspiration for a replacement for `libsamplerate` with a pure C99 hardware-matching 8-point Lagrange resampler, a VP 2D-list handle `0..63` guard, and the EP `Y:$0800` 8th-order elliptic 120 Hz LFE lowpass implementation. Xemu Symphony has never sounded better than it does now thanks to these contributions from Emusyne. 
 
 ---
 * @Mainkill1 Thanks for the several late night conversations to keep me going through yet another all-nighter. It's always a pleasure to hang with other night owls. And of course for your meticulous project management over your own Xemu fork which produced for me these four commits that I cleanly integrated into Symphony:

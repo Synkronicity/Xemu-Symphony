@@ -449,17 +449,6 @@ LIBS = [
         pkg_ubuntu="libpixman-1-dev",
     ),
     Lib(
-        "libsamplerate",
-        "https://github.com/libsndfile/libsamplerate",
-        bsd_2clause,
-        "https://raw.githubusercontent.com/libsndfile/libsamplerate/master/COPYING",
-        ships_static={windows},
-        ships_dynamic={macos},
-        pkgconfig=PkgConfig("samplerate"),
-        pkg_win="libsamplerate",
-        pkg_mac="libsamplerate",
-    ),
-    Lib(
         "zlib",
         "https://zlib.net/",
         zlib,

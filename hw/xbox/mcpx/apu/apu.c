@@ -333,6 +333,7 @@ static void mcpx_apu_reset_locked(MCPXAPUState *d)
     memset(d->regs, 0, sizeof(d->regs));
 
     mcpx_apu_vp_reset(d);
+    mcpx_apu_dsp_reset(d);
 
     // FIXME: Reset DSP state
     dsp_invalidate_opcache(d->gp.dsp);

@@ -27,10 +27,11 @@
 
 static const struct {
     hwaddr top, current, next;
+    bool allow_3d;
 } voice_list_regs[] = {
-    { NV_PAPU_TVL2D, NV_PAPU_CVL2D, NV_PAPU_NVL2D }, // 2D
-    { NV_PAPU_TVL3D, NV_PAPU_CVL3D, NV_PAPU_NVL3D }, // 3D
-    { NV_PAPU_TVLMP, NV_PAPU_CVLMP, NV_PAPU_NVLMP }, // MP
+    { NV_PAPU_TVL2D, NV_PAPU_CVL2D, NV_PAPU_NVL2D, false }, // 2D
+    { NV_PAPU_TVL3D, NV_PAPU_CVL3D, NV_PAPU_NVL3D, true },  // 3D
+    { NV_PAPU_TVLMP, NV_PAPU_CVLMP, NV_PAPU_NVLMP, true },  // MP
 };
 
 static void set_notify_status(MCPXAPUState *d, uint32_t v, int notifier,
@@ -54,9 +55,9 @@ static void set_notify_status(MCPXAPUState *d, uint32_t v, int notifier,
     d->set_irq = true;
 }
 
-static void voice_destroy_resampler(MCPXAPUVoiceFilter *filter)
+static void voice_resample_reset(MCPXAPUVoiceFilter *filter)
 {
-    mcpx_apu_resampler_destroy(&filter->resampler, &filter->resampler_channels);
+    mcpx_voice_resampler_destroy(&filter->resampler);
 }
 
 static void voice_reset_filters(MCPXAPUState *d, uint16_t v)
@@ -65,7 +66,7 @@ static void voice_reset_filters(MCPXAPUState *d, uint16_t v)
     memset(&d->vp.filters[v].svf, 0, sizeof(d->vp.filters[v].svf));
     hrtf_filter_clear_history(&d->vp.filters[v].hrtf);
     mcpx_apu_adpcm_cache_reset(&d->vp.filters[v].adpcm_cache);
-    voice_destroy_resampler(&d->vp.filters[v]);
+    voice_resample_reset(&d->vp.filters[v]);
 }
 
 static bool voice_should_mute(uint16_t v)
@@ -1185,17 +1186,15 @@ static long voice_resample_callback(void *cb_data, float **data)
         sample_count += count;
     }
 
-    if (sample_count < NUM_SAMPLES_PER_FRAME) {
-        /* Starvation causes SRC hang on repeated calls. Provide silence. */
-        memset(&filter->resample_buf[2*sample_count], 0,
-            2*(NUM_SAMPLES_PER_FRAME-sample_count)*sizeof(float));
-        sample_count = NUM_SAMPLES_PER_FRAME;
+    if (sample_count == 0) {
+        *data = NULL;
+        return 0;
     }
 
-    if (filter->resampler_channels == 1) {
+    if (filter->resampler.channels == 1) {
         mcpx_apu_pack_mono_samples((const float (*)[2])filter->resample_buf,
                                    filter->mono_resample_buf,
-                                   NUM_SAMPLES_PER_FRAME);
+                                   sample_count);
         *data = filter->mono_resample_buf;
     } else {
         *data = filter->resample_buf;
@@ -1210,49 +1209,25 @@ static int voice_resample(MCPXAPUState *d, uint16_t v, float samples[][2],
     MCPXAPUVoiceFilter *filter = &d->vp.filters[v];
     int channels = stereo ? 2 : 1;
 
-    if (filter->resampler != NULL && filter->resampler_channels != channels) {
-        voice_destroy_resampler(filter);
+    if (filter->resampler.cb != NULL &&
+        filter->resampler.channels != channels) {
+        voice_resample_reset(filter);
     }
 
-    if (filter->resampler == NULL) {
+    if (filter->resampler.cb == NULL) {
         filter->voice = v;
-        filter->resampler_channels = channels;
-        int err;
-
-        /* Note: Using a sinc based resampler for quality. Unsure about
-         * hardware's actual interpolation method; it could just be linear, in
-         * which case using this resampler is overkill, but quality is good
-         * so use it for now.
-         */
-        filter->resampler = src_callback_new(&voice_resample_callback,
-                                             SRC_SINC_FASTEST, channels, &err,
-                                             filter);
-        if (filter->resampler == NULL) {
-            fprintf(stderr, "src error: %s\n", src_strerror(err));
-            assert(0);
-        }
+        mcpx_voice_resampler_init(&filter->resampler, &voice_resample_callback,
+                                  filter, channels);
     }
 
-    int count;
-    if (channels == 1) {
-        float mono_samples[NUM_SAMPLES_PER_FRAME];
-        count = src_callback_read(filter->resampler, rate, requested_num,
-                                  mono_samples);
-        if (count > 0) {
-            mcpx_apu_expand_mono_samples(mono_samples, samples, count);
-        }
-    } else {
-        count = src_callback_read(filter->resampler, rate, requested_num,
-                                  (float *)samples);
-    }
-    if (count == -1) {
-        DPRINTF("resample error\n");
-    }
+    int count = mcpx_voice_resampler_process(&filter->resampler, (double)rate,
+                                             requested_num, samples);
     if (count != requested_num) {
         DPRINTF("resample returned fewer than expected: %d\n", count);
 
-        if (count == 0)
+        if (count == 0) {
             return -1;
+        }
     }
 
     return count;
@@ -1353,7 +1328,7 @@ static void get_multipass_samples(MCPXAPUState *d,
 static void voice_process(MCPXAPUState *d,
                           float mixbins[NUM_MIXBINS][NUM_SAMPLES_PER_FRAME],
                           float sample_buf[NUM_SAMPLES_PER_FRAME][2],
-                          uint16_t v, int voice_list)
+                          uint16_t v, int voice_list, bool allow_3d)
 {
     assert(v < MCPX_HW_MAX_VOICES);
     bool stereo = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT,
@@ -1444,11 +1419,11 @@ static void voice_process(MCPXAPUState *d,
                             NV_PAVS_VOICE_CFG_FMT_V7BIN);
 
     uint16_t hrtf_handle = HRTF_NULL_HANDLE;
-    if (v < MCPX_HW_MAX_3D_VOICES) {
+    if (allow_3d && v < MCPX_HW_MAX_3D_VOICES) {
         hrtf_handle = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_HRTF_TARGET,
                                      NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
     }
-    bool use_hrtf = (v < MCPX_HW_MAX_3D_VOICES) && !stereo &&
+    bool use_hrtf = allow_3d && (v < MCPX_HW_MAX_3D_VOICES) && !stereo &&
                     (hrtf_handle != HRTF_NULL_HANDLE);
 
     if (use_hrtf) {
@@ -1590,7 +1565,7 @@ static void voice_process(MCPXAPUState *d,
     }
 }
 
-static void get_voice_bin_src_dst(MCPXAPUState *d, int v,
+static void get_voice_bin_src_dst(MCPXAPUState *d, int v, bool allow_3d,
                                   uint32_t *src, uint32_t *dst, uint32_t *clr)
 {
     uint32_t src_v = 0;
@@ -1613,11 +1588,11 @@ static void get_voice_bin_src_dst(MCPXAPUState *d, int v,
     bool stereo = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT,
                                  NV_PAVS_VOICE_CFG_FMT_STEREO);
     uint16_t hrtf_handle = HRTF_NULL_HANDLE;
-    if (v < MCPX_HW_MAX_3D_VOICES) {
+    if (allow_3d && v < MCPX_HW_MAX_3D_VOICES) {
         hrtf_handle = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_HRTF_TARGET,
                                      NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
     }
-    bool use_hrtf = (v < MCPX_HW_MAX_3D_VOICES) && !stereo &&
+    bool use_hrtf = allow_3d && (v < MCPX_HW_MAX_3D_VOICES) && !stereo &&
                     (hrtf_handle != HRTF_NULL_HANDLE);
 
     int bin[8];
@@ -1686,7 +1661,8 @@ static void *voice_worker_thread(void *arg)
             }
             for (int i = 0; i < self->queue_len; i++) {
                 voice_process(d, self->mixbins, self->sample_buf,
-                              self->queue[i].voice, self->queue[i].list);
+                              self->queue[i].voice, self->queue[i].list,
+                              self->queue[i].allow_3d);
             }
 
             qemu_mutex_lock(&vwd->lock);
@@ -1723,7 +1699,7 @@ static void *voice_worker_thread(void *arg)
     return NULL;
 }
 
-static void voice_work_enqueue(MCPXAPUState *d, int v, int list)
+static void voice_work_enqueue(MCPXAPUState *d, int v, int list, bool allow_3d)
 {
     VoiceWorkDispatch *vwd = &d->vp.voice_work_dispatch;
 
@@ -1731,6 +1707,7 @@ static void voice_work_enqueue(MCPXAPUState *d, int v, int list)
     vwd->queue[vwd->queue_len++] = (VoiceWorkItem){
         .voice = v,
         .list = list,
+        .allow_3d = allow_3d,
     };
 }
 
@@ -1753,7 +1730,8 @@ static void voice_work_schedule(MCPXAPUState *d)
     bool serial = false;
     for (int i = 0; i < vwd->queue_len; i++) {
         uint32_t src, dst, clr;
-        get_voice_bin_src_dst(d, vwd->queue[i].voice, &src, &dst, &clr);
+        get_voice_bin_src_dst(d, vwd->queue[i].voice,
+                              vwd->queue[i].allow_3d, &src, &dst, &clr);
         if ((src && (src != MULTIPASS_BIN_MASK || clr != MULTIPASS_BIN_MASK)) ||
             (!src && !(dst & MULTIPASS_BIN_MASK) &&
              (dirty & MULTIPASS_BIN_MASK))) {
@@ -1765,7 +1743,8 @@ static void voice_work_schedule(MCPXAPUState *d)
 
     for (int i = 0; i < vwd->queue_len; i++) {
         uint32_t src, dst, clr;
-        get_voice_bin_src_dst(d, vwd->queue[i].voice, &src, &dst, &clr);
+        get_voice_bin_src_dst(d, vwd->queue[i].voice,
+                              vwd->queue[i].allow_3d, &src, &dst, &clr);
 
         if (serial) {
             group = true;
@@ -1920,7 +1899,7 @@ void mcpx_apu_vp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_P
                                 NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE)) {
                 fe_method(d, SE2FE_IDLE_VOICE, v);
             } else {
-                voice_work_enqueue(d, v, list);
+                voice_work_enqueue(d, v, list, voice_list_regs[list].allow_3d);
             }
             d->regs[current] = d->regs[next];
         }
@@ -1930,8 +1909,8 @@ void mcpx_apu_vp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_P
     if (d->monitor.point == MCPX_APU_DEBUG_MON_VP) {
         /* Mix all voices together to hear any audible voice */
         int16_t isamp[NUM_SAMPLES_PER_FRAME * 2];
-        src_float_to_short_array((float *)d->vp.sample_buf, isamp,
-                                 NUM_SAMPLES_PER_FRAME * 2);
+        mcpx_apu_float_to_short_array((const float *)d->vp.sample_buf, isamp,
+                                      NUM_SAMPLES_PER_FRAME * 2);
         int off = (d->ep_frame_div % 8) * NUM_SAMPLES_PER_FRAME;
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
             d->monitor.frame_buf[off + i][0] += isamp[2*i];
@@ -1951,6 +1930,7 @@ void mcpx_apu_vp_init(MCPXAPUState *d)
             s_attenuation_table[vol] = powf(10.0f, vol / (64.0f * -20.0f));
         }
         s_attenuation_table[4095] = 0.0f;
+        lagrange_tables_init();
         table_initialized = true;
     }
     voice_work_init(d);
@@ -1960,7 +1940,7 @@ void mcpx_apu_vp_finalize(MCPXAPUState *d)
 {
     voice_work_finalize(d);
     for (int v = 0; v < ARRAY_SIZE(d->vp.filters); v++) {
-        voice_destroy_resampler(&d->vp.filters[v]);
+        voice_resample_reset(&d->vp.filters[v]);
     }
 }
 
@@ -1976,7 +1956,7 @@ void mcpx_apu_vp_reset(MCPXAPUState *d)
     memset(d->vp.submix_headroom, 0, sizeof(d->vp.submix_headroom));
     memset(d->vp.voice_locked, 0, sizeof(d->vp.voice_locked));
     for (int v = 0; v < ARRAY_SIZE(d->vp.filters); v++) {
-        voice_destroy_resampler(&d->vp.filters[v]);
+        voice_resample_reset(&d->vp.filters[v]);
         mcpx_apu_adpcm_cache_reset(&d->vp.filters[v].adpcm_cache);
         hrtf_filter_init(&d->vp.filters[v].hrtf);
         memset(d->vp.filters[v].svf, 0, sizeof(d->vp.filters[v].svf));

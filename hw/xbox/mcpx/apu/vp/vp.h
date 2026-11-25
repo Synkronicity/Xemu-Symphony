@@ -21,8 +21,6 @@
 #ifndef HW_XBOX_MCPX_VP_H
 #define HW_XBOX_MCPX_VP_H
 
-#include <samplerate.h>
-
 #include "qemu/osdep.h"
 #include "qemu/thread.h"
 #include "hw/hw.h"
@@ -31,6 +29,7 @@
 #include "svf.h"
 #include "hrtf.h"
 #include "adpcm.h"
+#include "resample.h"
 
 typedef struct MCPXAPUState MCPXAPUState;
 
@@ -45,8 +44,7 @@ typedef struct MCPXAPUVoiceFilter {
     uint16_t voice;
     float resample_buf[NUM_SAMPLES_PER_FRAME * 2];
     float mono_resample_buf[NUM_SAMPLES_PER_FRAME];
-    SRC_STATE *resampler;
-    int resampler_channels;
+    MCPXVoiceResampler resampler;
     MCPXADPCMBlockCache adpcm_cache;
     sv_filter svf[2];
     HrtfFilter hrtf;
@@ -55,6 +53,7 @@ typedef struct MCPXAPUVoiceFilter {
 typedef struct VoiceWorkItem {
     int voice;
     int list;
+    bool allow_3d;
 } VoiceWorkItem;
 
 typedef struct VoiceWorker {

@@ -1,3 +1,3 @@
-mcpx_ss.add(libsamplerate, files(
+mcpx_ss.add(files(
 	'vp.c'
 	))

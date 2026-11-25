@@ -2435,8 +2435,6 @@ else
   libpcap = dependency('libpcap', method: 'pkg-config', required: true)
 endif
 
-libsamplerate = dependency('samplerate', method: 'pkg-config', required: true)
-
 imgui_proj = subproject('imgui', required: true,
                          default_options: [
                            'default_library=static',
