@@ -71,6 +71,13 @@ jobs:
             echo "Ephemeral conflicts resolved successfully."
           fi
 
+       - name: Verify libsamplerate Removal
+         run: |
+           if grep -rn "samplerate" meson.build debian/control hw/xbox/mcpx/apu/vp/meson.build; then
+            echo "::error::libsamplerate reference reintroduced during upstream merge!"
+            exit 1
+           fi
+
       - name: Update Submodules
         run: git submodule update --init --recursive
 
